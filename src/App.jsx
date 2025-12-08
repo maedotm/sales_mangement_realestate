@@ -20,7 +20,6 @@ import {
 } from 'firebase/firestore';
 
 // --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
-// --- REQUIRED MODIFICATION FOR LOCAL RUNNING --
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCoNemAruEfSEl65Z08a2TfQhfUHvF1Zvw",
   authDomain: "realestate-a7e4b.firebaseapp.com",
@@ -38,7 +37,6 @@ const appId = FIREBASE_CONFIG.projectId;
 const firebaseConfig = FIREBASE_CONFIG;
 const initialAuthToken = null;
 
-
 // The default set of units per floor for initial creation
 const DEFAULT_UNIT_TYPES = ['A', 'B', 'C'];
 const DEFAULT_INITIAL_FLOORS = 17; 
@@ -52,6 +50,7 @@ const ICON_SVGS = {
     Target: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
     MapPin: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.5s-7-7.6-7-10.5C5 6.4 8.5 3 12 3s7 3.4 7 8C19 13.9 12 21.5 12 21.5z"/><circle cx="12" cy="11" r="3"/></svg>`,
     Key: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18L10 10l5 5L17 13M12.5 17.5L14 16m3-3l-2.5 2.5m-8.5-4a3.5 3.5 0 017 0V22a1 1 0 01-2 0v-5.5m-3 0a3.5 3.5 0 00-7 0v5.5a1 1 0 002 0v-5.5z"/></svg>`,
+    Bell: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>`,
 };
 
 // Component to render the logo, supporting both SVG icons and image URLs
@@ -195,48 +194,45 @@ const calculateFinancialsFromSchedule = (schedule) => {
     };
 };
 
-// --- NEW HELPER: Find the earliest active reminder across all units ---
-const findNextActiveReminder = (units) => {
-    let earliestReminder = null;
-    let unitWithReminder = null;
+// --- HELPER: Find ALL active reminders across all units ---
+const findAllActiveReminders = (units) => {
+    let activeReminders = [];
 
     for (const unit of units) {
         if (!unit.paymentSchedule || unit.status === 'Available') continue;
 
-        // Ensure paymentSchedule is an array, map Timestamps to Dates
-        const reminders = (unit.paymentSchedule || [])
+        // Ensure paymentSchedule is an array
+        const unitReminders = (unit.paymentSchedule || [])
             .filter(item => item.status === 'Pending' && item.reminderEnabled)
-            .map(item => ({
-                ...item,
-                dueDate: item.dueDate instanceof Timestamp ? item.dueDate.toDate() : new Date(item.dueDate),
-            }))
-            .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+            .map(item => {
+                // Convert to Date object if it's a Firestore Timestamp instance
+                const dueDate = item.dueDate instanceof Timestamp ? item.dueDate.toDate() : new Date(item.dueDate);
+                return {
+                    ...item,
+                    unitId: unit.unitId,
+                    floorName: unit.floorName,
+                    unitDocId: unit.id, // Include Firestore document ID
+                    dueDate: dueDate,
+                };
+            })
+            .filter(item => {
+                // Only consider dates in the future or today (daysRemaining >= 0)
+                // Use a temporary Timestamp for calculateDaysRemaining
+                const daysRemaining = calculateDaysRemaining(Timestamp.fromDate(item.dueDate));
+                return daysRemaining !== 'OVERDUE' && daysRemaining >= 0;
+            });
 
-        if (reminders.length > 0) {
-            const currentEarliest = reminders[0];
-            
-            // Only consider dates in the future or today
-            const daysRemaining = calculateDaysRemaining(Timestamp.fromDate(currentEarliest.dueDate));
-
-            if (daysRemaining !== 'OVERDUE' && daysRemaining >= 0) {
-                if (!earliestReminder || currentEarliest.dueDate < earliestReminder.dueDate) {
-                    earliestReminder = currentEarliest;
-                    unitWithReminder = unit;
-                }
-            }
-        }
+        activeReminders = [...activeReminders, ...unitReminders];
     }
+    
+    // Sort all reminders by due date
+    activeReminders.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
-    if (earliestReminder) {
-        return {
-            unitId: unitWithReminder.unitId,
-            floorName: unitWithReminder.floorName,
-            dueDate: earliestReminder.dueDate,
-            amount: earliestReminder.amount,
-            daysRemaining: calculateDaysRemaining(Timestamp.fromDate(earliestReminder.dueDate))
-        };
-    }
-    return null;
+    // Calculate days remaining for display purposes now
+    return activeReminders.map(r => ({
+        ...r,
+        daysRemaining: calculateDaysRemaining(Timestamp.fromDate(r.dueDate))
+    }));
 };
 // --- END NEW HELPER ---
 
@@ -1055,6 +1051,51 @@ const ReminderBanner = ({ reminder }) => {
     );
 };
 
+// --- Notification Popover Component (NEW) ---
+const NotificationPopover = ({ reminders, onClose, onUnitSelect }) => {
+    return (
+        <div className="absolute right-0 top-12 mt-2 w-80 rounded-xl shadow-2xl bg-white ring-1 ring-black ring-opacity-5 z-50 transition-all transform origin-top-right">
+            <div className="p-4 border-b flex justify-between items-center">
+                <h3 className="text-lg font-bold text-indigo-700">Payment Reminders</h3>
+                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-600">
+                    {reminders.length} Active
+                </span>
+            </div>
+            <div className="py-2 max-h-96 overflow-y-auto">
+                {reminders.length === 0 ? (
+                    <p className="text-gray-500 text-sm p-4 text-center">No active reminders.</p>
+                ) : (
+                    reminders.map((r, index) => (
+                        <div 
+                            key={index} 
+                            className="px-4 py-3 hover:bg-gray-50 border-b last:border-b-0 cursor-pointer" 
+                            onClick={() => {
+                                onClose();
+                                onUnitSelect(r.unitDocId); // Pass the full unit Doc ID
+                            }}
+                        >
+                            <div className="flex justify-between items-center text-sm">
+                                <span className="font-semibold text-gray-800">Unit {r.unitId} - {r.floorName}</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${r.daysRemaining <= 7 ? 'bg-yellow-500 text-white' : 'bg-indigo-100 text-indigo-600'}`}>
+                                    {r.daysRemaining === 0 ? 'Due Today' : `${r.daysRemaining} days`}
+                                </span>
+                            </div>
+                            <p className="text-xs text-gray-600 mt-1">
+                                <span className="font-bold">${r.amount.toLocaleString()}</span> due on {new Date(r.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </p>
+                        </div>
+                    ))
+                )}
+            </div>
+            <div className="p-2 border-t text-center">
+                <button onClick={onClose} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                    Close
+                </button>
+            </div>
+        </div>
+    );
+};
+
 // --- Editable Title Component ---
 const EditableTitle = ({ initialTitle, db, userId }) => {
     const [isEditing, setIsEditing] = useState(false);
@@ -1159,8 +1200,9 @@ export default function App() {
     const [appLogoType, setAppLogoType] = useState('icon'); 
     const [appLogoSource, setAppLogoSource] = useState('Building'); 
     
-    // NEW: Reminder state
-    const [nextReminder, setNextReminder] = useState(null); 
+    // Reminder state
+    const [nextReminder, setNextReminder] = useState(null); // Used for the banner (earliest one)
+    const [allReminders, setAllReminders] = useState([]); // NEW: Used for the notification popover
     
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -1170,6 +1212,7 @@ export default function App() {
     const [showEditModal, setShowEditModal] = useState(false);
     const [showManageModal, setShowManageModal] = useState(false);
     const [showLogoModal, setShowLogoModal] = useState(false); 
+    const [showNotifications, setShowNotifications] = useState(false); // NEW: To toggle popover
 
     // --- 1. Initialize Firebase and Auth ---
     useEffect(() => {
@@ -1324,7 +1367,7 @@ export default function App() {
     };
 
 
-    // --- 4. Memoized Data Transformations ---
+    // --- 4. Memoized Data Transformations & Reminders Update ---
 
     // Group the flat 'units' array into an object keyed by 'floorName'
     const floors = useMemo(() => {
@@ -1389,12 +1432,16 @@ export default function App() {
         };
     }, [units]);
 
-    // --- NEW: Update nextReminder whenever units change ---
+    // Update reminders whenever units change
     useEffect(() => {
         if (units.length > 0) {
-            const reminder = findNextActiveReminder(units);
-            setNextReminder(reminder);
+            const reminders = findAllActiveReminders(units);
+            setAllReminders(reminders);
+            
+            // Keep nextReminder for the banner (earliest one)
+            setNextReminder(reminders.length > 0 ? reminders[0] : null);
         } else {
+             setAllReminders([]);
              setNextReminder(null);
         }
     }, [units]);
@@ -1404,6 +1451,18 @@ export default function App() {
     const handleUnitClick = (unit) => {
         setSelectedUnit(unit);
         setShowEditModal(true);
+    };
+    
+    // Handler for clicking a reminder in the popover
+    const handleNotificationClick = (unitDocId) => {
+        // Find the full unit object from the flat 'units' array using the Firestore Document ID
+        const unit = units.find(u => u.id === unitDocId);
+        if (unit) {
+            setSelectedUnit(unit);
+            setShowEditModal(true);
+        } else {
+            console.error("Unit not found for ID:", unitDocId);
+        }
     };
 
     const handleCloseModal = () => {
@@ -1495,7 +1554,7 @@ export default function App() {
             <header className="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
                 <div className="flex flex-col md:flex-row justify-between md:items-start">
                     
-                    {/* Logo and Editable Title Group */}
+                    {/* Logo and Editable Title Group (Left) */}
                     <div className="flex items-start space-x-4 mb-4 md:mb-0">
                         {/* Logo Area */}
                         <div 
@@ -1519,16 +1578,42 @@ export default function App() {
                         </div>
                     </div>
                     
-                    <button
-                        onClick={handleShowManageModal}
-                        className="px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition flex-shrink-0"
-                    >
-                        Manage Building Structure
-                    </button>
+                    {/* Actions and Notifications (Right) */}
+                    <div className="flex items-center space-x-4">
+                        {/* Notification Bell (NEW) */}
+                        <div className="relative">
+                            <button 
+                                onClick={() => setShowNotifications(!showNotifications)}
+                                className="p-3 bg-gray-100 rounded-full hover:bg-gray-200 transition relative"
+                                title="View Payment Reminders"
+                            >
+                                <div dangerouslySetInnerHTML={{ __html: ICON_SVGS.Bell }} className="w-6 h-6 text-gray-700" />
+                                {allReminders.length > 0 && (
+                                    <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">
+                                        {allReminders.length}
+                                    </span>
+                                )}
+                            </button>
+                            {showNotifications && (
+                                <NotificationPopover 
+                                    reminders={allReminders} 
+                                    onClose={() => setShowNotifications(false)} 
+                                    onUnitSelect={handleNotificationClick} 
+                                />
+                            )}
+                        </div>
+                        {/* Manage Button */}
+                        <button
+                            onClick={handleShowManageModal}
+                            className="px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition flex-shrink-0"
+                        >
+                            Manage Building Structure
+                        </button>
+                    </div>
                 </div>
             </header>
             
-            {/* --- REMINDER BANNER --- */}
+            {/* --- REMINDER BANNER (Shows the earliest reminder) --- */}
             <ReminderBanner reminder={nextReminder} />
 
             {/* --- Stats Dashboard --- */}
