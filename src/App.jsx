@@ -204,7 +204,7 @@ const LoginScreen = ({ onLogin, loading, error }) => {
         <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-inter">
             <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-extrabold text-indigo-800">Skyline<span className="text-indigo-500">Tracker</span></h1>
+                    <h1 className="text-3xl font-extrabold text-indigo-800">Mad<span className="text-indigo-500">Tracking</span></h1>
                     <p className="text-gray-500 mt-2">Secure Real Estate Management</p>
                 </div>
 
@@ -281,7 +281,7 @@ const Sidebar = ({ currentView, setView, role, onLogout }) => {
     return (
         <div className="w-64 bg-white border-r border-gray-200 h-screen fixed left-0 top-0 flex flex-col z-20">
             <div className="p-6 border-b border-gray-100">
-                <h2 className="text-2xl font-black text-indigo-800 tracking-tight">Skyline<span className="text-indigo-500">Tracker</span></h2>
+                <h2 className="text-2xl font-black text-indigo-800 tracking-tight">Mad<span className="text-indigo-500">Tracking</span></h2>
                 <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">{role}</p>
             </div>
             
