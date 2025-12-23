@@ -1,597 +1,737 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from 'firebase/auth';
 import { 
-    getFirestore, 
+    getFirestore,
+    initializeFirestore,
     collection, 
     doc, 
     setDoc, 
     onSnapshot, 
     query, 
     writeBatch, 
-    updateDoc,
+    updateDoc, 
+    deleteDoc,
     where,
     getDocs,
     Timestamp,
-    orderBy,
-    getDoc,
-    deleteDoc,
     setLogLevel
 } from 'firebase/firestore';
 
-// --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
-const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCoNemAruEfSEl65Z08a2TfQhfUHvF1Zvw",
-  authDomain: "realestate-a7e4b.firebaseapp.com",
-  projectId: "realestate-a7e4b",
-  storageBucket: "realestate-a7e4b.firebasestorage.app",
-  messagingSenderId: "442990002816",
-  appId: "1:442990002816:web:5c80a309c5995fd2561c65",
-  measurementId: "G-8C3Q3FVDPB"
-};
+// --- GLOBAL CONSTANTS ---
+const APP_ID = 'realestatedash-88e32'; // Updated with the Firebase Project ID
 
-// 2. We use the projectId as a unique identifier for the artifact path
-const appId = FIREBASE_CONFIG.projectId;
+let FIREBASE_CONFIG = {};
+try {
+    // --- START: PASTE YOUR FIREBASE CONFIG HERE ---
+    FIREBASE_CONFIG = {
+        apiKey: "AIzaSyDwILENUzfSYnZxCPmcEpWNB1gjap6VkOs",
+        authDomain: "realestatedash-88e32.firebaseapp.com",
+        projectId: "realestatedash-88e32", 
+        storageBucket: "realestatedash-88e32.firebasestorage.app",
+        messagingSenderId: "831420404746",
+        appId: "1:831420404746:web:9423470fcf9c8ffd497bf3",
+        measurementId: "G-LQT2WFM0Z2"
+    };
+    // --- END: PASTE YOUR FIREBASE CONFIG HERE ---
 
-// 3. Set the config variables using your actual values
-const firebaseConfig = FIREBASE_CONFIG;
-const initialAuthToken = null;
+    // The rest of the original parsing logic remains the same, but the initial object is populated.
+    // ...
+} catch (e) {
+    console.error("Error parsing firebase config", e);
+}
+// Set to null locally. The app will use signInAnonymously().
+const INITIAL_AUTH_TOKEN = null; 
 
-// The default set of units per floor for initial creation
 const DEFAULT_UNIT_TYPES = ['A', 'B', 'C'];
-const DEFAULT_INITIAL_FLOORS = 17; 
+const DEFAULT_INITIAL_FLOORS = 17;
 
-// --- ICON Definitions (using inline SVG for single-file compliance) ---
-const ICON_SVGS = {
-    Building: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4"/><path d="M15 22v-4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 6h4"/></svg>`,
-    House: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L3 9h3v12h12V9h3L12 2z"/><path d="M9 21v-8h6v8"/></svg>`,
-    BarChart4: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17v-4"/><path d="M8 17v-8"/></svg>`,
-    DollarSign: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>`,
-    Target: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
-    MapPin: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.5s-7-7.6-7-10.5C5 6.4 8.5 3 12 3s7 3.4 7 8C19 13.9 12 21.5 12 21.5z"/><circle cx="12" cy="11" r="3"/></svg>`,
-    Key: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18L10 10l5 5L17 13M12.5 17.5L14 16m3-3l-2.5 2.5m-8.5-4a3.5 3.5 0 017 0V22a1 1 0 01-2 0v-5.5m-3 0a3.5 3.5 0 00-7 0v5.5a1 1 0 002 0v-5.5z"/></svg>`,
-    Bell: `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>`,
+// --- ROLES & PERMISSIONS ---
+const ROLES = {
+    ADMIN: 'System Admin',
+    OWNER: 'Owner',
+    ACCOUNTANT: 'Accountant',
+    SALES: 'Sales Agent'
 };
 
-// Component to render the logo, supporting both SVG icons and image URLs
-const LogoDisplay = ({ logoType, logoSource, size = 32, className = 'text-white' }) => {
-    const wrapperClasses = `flex-shrink-0 flex items-center justify-center transition-colors duration-200 ${className}`;
-    const style = { width: size, height: size };
-
-    if (logoType === 'url' && logoSource) {
-        // Render external image URL
-        // Using placeholder in case of image load failure
-        const fallbackSrc = `https://placehold.co/${size}x${size}/818CF5/ffffff?text=Logo`;
-        
-        return (
-            <div className={wrapperClasses} style={style}>
-                <img
-                    src={logoSource}
-                    alt="Custom App Logo"
-                    className="w-full h-full object-contain rounded-full"
-                    onError={(e) => {
-                        e.target.onerror = null; // Prevents infinite loop
-                        e.target.src = fallbackSrc;
-                    }}
-                />
-            </div>
-        );
-    }
-    
-    // Render internal SVG icon (default)
-    const svgString = ICON_SVGS[logoSource] || ICON_SVGS['Building']; 
-    
-    return (
-        <div 
-            className={wrapperClasses}
-            style={style}
-            dangerouslySetInnerHTML={{ __html: svgString }}
-        />
-    );
-};
-// --- END Logo Definitions ---
-
-
-// Helper to calculate days remaining until a timestamp
-const calculateDaysRemaining = (timestamp) => {
-    if (!timestamp) return null;
-    const now = new Date();
-    const future = timestamp.toDate();
-    const diffMs = future.getTime() - now.getTime();
-    
-    if (diffMs < 0) return 'OVERDUE';
-    
-    // Calculate days remaining (ceiling to include today)
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    return diffDays;
+const PERMISSIONS = {
+    [ROLES.ADMIN]: { canEdit: true, canManageUsers: true, canManageBuilding: true, viewFinancials: true, canConfig: true },
+    [ROLES.OWNER]: { canEdit: true, canManageUsers: false, canManageBuilding: true, viewFinancials: true, canConfig: true },
+    [ROLES.ACCOUNTANT]: { canEdit: false, canManageUsers: false, canManageBuilding: false, viewFinancials: true, canConfig: false },
+    [ROLES.SALES]: { canEdit: false, canManageUsers: false, canManageBuilding: false, viewFinancials: false, canConfig: false }, 
 };
 
-// Initial data structure for a single unit
-const createUnitData = (floor, unitId) => {
-    // Default bed logic: 'C' is 3 beds, otherwise 2 beds
+// --- ICONS (Inline SVGs) ---
+const Icons = {
+    Dashboard: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>,
+    Building: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>,
+    Config: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+    Users: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+    Bell: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>,
+    Logout: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>,
+    Profile: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+};
+
+// --- DATA HELPERS ---
+const createUnitData = (floor, unitId, customArea = 100, customPrice = 2000) => {
     let beds = (unitId === 'C' || unitId.length > 1) ? 3 : 2; 
-    
-    // Default values for area and price/sqm (NEW ADDITIONS)
-    const area = 100; // default 100 sqm
-    const priceSqM = 2000; // default $2000 per sqm
-
-    // Simple ID generation for Firestore
     const floorIdStr = String(floor).padStart(2, '0');
 
     return {
         id: `F${floorIdStr}-${unitId}`,
-        floor: floor, // Storing floor number for sorting ease
+        floor: floor,
         floorName: `${getOrdinal(floor)} Floor`,
         unitId: unitId,
         beds: beds,
-        areaSqm: area, // NEW
-        pricePerSqm: priceSqM, // NEW
-        status: 'Available', // Available, Held, Sold
+        areaSqm: Number(customArea),
+        pricePerSqm: Number(customPrice),
+        status: 'Available',
         clientName: '',
-        totalPrice: area * priceSqM, // CALCULATED from Area * PricePerSqm
-        amountPaid: 0, // Derived from paymentSchedule
-        nextPaymentDate: null, // Derived from paymentSchedule
-        paymentSchedule: [], // Array of { id, amount, dueDate, status, reminderEnabled } // REMINDER FLAG ADDED
+        totalPrice: Number(customArea) * Number(customPrice),
+        amountPaid: 0,
+        nextPaymentDate: null,
+        paymentSchedule: [],
         updatedBy: '',
         updatedAt: Timestamp.now(),
      };
 };
 
-// Helper for ordinal numbers (1st, 2nd, 3rd, 4th, etc.)
 const getOrdinal = (n) => {
     const s = ["th", "st", "nd", "rd"];
     const v = n % 100;
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-// Helper function to generate the next unit letter (A -> B, B -> C, etc.)
 const getNextUnitId = (unitsOnFloor) => {
     const currentUnitIds = unitsOnFloor.map(u => u.unitId).sort();
     if (currentUnitIds.length === 0) return 'A';
-
     const lastId = currentUnitIds[currentUnitIds.length - 1];
-    
-    // Simple increment for single letters (A-Z)
     if (lastId.length === 1 && lastId.charCodeAt(0) < 'Z'.charCodeAt(0)) {
         return String.fromCharCode(lastId.charCodeAt(0) + 1);
     }
-
-    // Fallback for complex IDs or reaching 'Z'
     const nextNumber = unitsOnFloor.length + 1;
     return `U${nextNumber}`; 
 };
 
-// Helper to calculate financials from schedule
 const calculateFinancialsFromSchedule = (schedule) => {
     let paid = 0;
     let nextDate = null;
     let totalScheduled = 0;
-
-    // Convert timestamps and sort by date
     const sortedSchedule = [...schedule]
         .map(item => ({
             ...item,
-            // Convert to Date object if it's a Firestore Timestamp instance or a date string
             dueDate: item.dueDate instanceof Timestamp ? item.dueDate.toDate() : new Date(item.dueDate),
         }))
         .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
     for (const item of sortedSchedule) {
         totalScheduled += item.amount;
-        if (item.status === 'Paid') {
-            paid += item.amount;
-        } else if (item.status === 'Pending' && nextDate === null) {
-            // Find the earliest pending date
-            nextDate = item.dueDate;
-        }
+        if (item.status === 'Paid') paid += item.amount;
+        else if (item.status === 'Pending' && nextDate === null) nextDate = item.dueDate;
     }
-
     return { 
         amountPaid: paid, 
-        // Convert back to Timestamp before saving or using in derived state
         nextPaymentDate: nextDate ? Timestamp.fromDate(nextDate) : null, 
         totalScheduled: totalScheduled 
     };
 };
 
-// --- HELPER: Find ALL active reminders across all units ---
-const findAllActiveReminders = (units) => {
-    let activeReminders = [];
-
-    for (const unit of units) {
-        if (!unit.paymentSchedule || unit.status === 'Available') continue;
-
-        // Ensure paymentSchedule is an array
-        const unitReminders = (unit.paymentSchedule || [])
-            .filter(item => item.status === 'Pending' && item.reminderEnabled)
-            .map(item => {
-                // Convert to Date object if it's a Firestore Timestamp instance
-                const dueDate = item.dueDate instanceof Timestamp ? item.dueDate.toDate() : new Date(item.dueDate);
-                return {
-                    ...item,
-                    unitId: unit.unitId,
-                    floorName: unit.floorName,
-                    unitDocId: unit.id, // Include Firestore document ID
-                    dueDate: dueDate,
-                };
-            })
-            .filter(item => {
-                // Only consider dates in the future or today (daysRemaining >= 0)
-                // Use a temporary Timestamp for calculateDaysRemaining
-                const daysRemaining = calculateDaysRemaining(Timestamp.fromDate(item.dueDate));
-                return daysRemaining !== 'OVERDUE' && daysRemaining >= 0;
-            });
-
-        activeReminders = [...activeReminders, ...unitReminders];
+const getStatusColor = (status) => {
+    switch (status) {
+        case 'Available': return 'bg-green-50 text-green-700 border-green-200';
+        case 'Held': return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+        case 'Sold': return 'bg-red-50 text-red-700 border-red-200';
+        default: return 'bg-gray-50 text-gray-700 border-gray-200';
     }
-    
-    // Sort all reminders by due date
-    activeReminders.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
-
-    // Calculate days remaining for display purposes now
-    return activeReminders.map(r => ({
-        ...r,
-        daysRemaining: calculateDaysRemaining(Timestamp.fromDate(r.dueDate))
-    }));
 };
-// --- END NEW HELPER ---
 
+const formatCurrencyRaw = (val) => {
+    return val ? val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",") : '';
+}
 
-// --- Logo Edit Modal Component (UPDATED) ---
-const LogoEditModal = ({ closeModal, db, userId, currentLogoType, currentLogoSource }) => {
-    const [logoType, setLogoType] = useState(currentLogoType || 'icon');
-    const [selectedIcon, setSelectedIcon] = useState(logoType === 'icon' ? currentLogoSource : 'Building');
-    const [customUrl, setCustomUrl] = useState(logoType === 'url' ? currentLogoSource : '');
-    const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState(null);
+const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(amount || 0);
+};
 
-    const iconKeys = useMemo(() => Object.keys(ICON_SVGS), []);
+// --- HELPER COMPONENTS ---
+const MoneyInput = ({ value, onChange, disabled, className, placeholder }) => {
+    const [displayVal, setDisplayVal] = useState('');
 
-    const handleSave = async () => {
-        if (isSaving) return;
-        setIsSaving(true);
-        setError(null);
+    useEffect(() => {
+        setDisplayVal(formatCurrencyRaw(value));
+    }, [value]);
 
-        let sourceToSave;
-        
-        if (logoType === 'icon') {
-            sourceToSave = selectedIcon;
-        } else {
-            sourceToSave = customUrl.trim();
-            if (!sourceToSave.startsWith('http')) {
-                 setError('Custom URL must be a valid web address starting with http/https.');
-                 setIsSaving(false);
-                 return;
-            }
-        }
-
-        try {
-            const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-            await updateDoc(settingsRef, {
-                appLogoType: logoType,
-                appLogoSource: sourceToSave,
-                lastUpdated: Timestamp.now(),
-                updatedBy: userId
-            });
-            closeModal();
-        } catch (e) {
-            console.error('Error updating app logo:', e);
-            setError('Failed to save logo. Check the console for details.');
-        } finally {
-            setIsSaving(false);
+    const handleChange = (e) => {
+        const rawInput = e.target.value.replace(/,/g, '');
+        if (rawInput === '' || /^\d+$/.test(rawInput)) {
+            setDisplayVal(e.target.value); // Temporarily show what user typed
+            onChange(rawInput); // Pass pure number to parent
         }
     };
 
+    const handleBlur = () => {
+        setDisplayVal(formatCurrencyRaw(value));
+    };
+
     return (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-80 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 transition-all duration-300">
-                <div className="flex justify-between items-start border-b pb-3 mb-4">
-                    <h2 className="text-2xl font-extrabold text-indigo-700">Select Application Logo</h2>
-                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-700 transition">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
+        <input 
+            type="text" 
+            value={displayVal} 
+            onChange={handleChange} 
+            onBlur={handleBlur}
+            disabled={disabled} 
+            className={className} 
+            placeholder={placeholder}
+        />
+    );
+};
+
+
+// --- COMPONENTS ---
+
+// 1. Login Screen
+const LoginScreen = ({ onLogin, loading, error }) => {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [demoRole, setDemoRole] = useState(null);
+
+    const handleLogin = (e) => {
+        e.preventDefault();
+        onLogin(email, password, null);
+    };
+
+    return (
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-inter">
+            <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl">
+                <div className="text-center mb-8">
+                    <h1 className="text-3xl font-extrabold text-indigo-800">Skyline<span className="text-indigo-500">Tracker</span></h1>
+                    <p className="text-gray-500 mt-2">Secure Real Estate Management</p>
                 </div>
 
                 {error && (
-                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-sm">{error}</div>
-                )}
-                
-                {/* Type Selection Tabs */}
-                <div className="flex mb-6 border-b">
-                    <button 
-                        onClick={() => setLogoType('icon')} 
-                        className={`py-2 px-4 text-sm font-semibold transition-colors ${logoType === 'icon' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}
-                        disabled={isSaving}
-                    >
-                        Icon Gallery
-                    </button>
-                    <button 
-                        onClick={() => setLogoType('url')} 
-                        className={`py-2 px-4 text-sm font-semibold transition-colors ${logoType === 'url' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-indigo-600'}`}
-                        disabled={isSaving}
-                    >
-                        Custom Image URL
-                    </button>
-                </div>
-                
-                {logoType === 'icon' ? (
-                    <div className="my-4">
-                        <p className="text-gray-600 mb-4">Choose an icon from the gallery below:</p>
-                        <div className="grid grid-cols-4 sm:grid-cols-5 gap-4 max-h-80 overflow-y-auto p-2 border rounded-lg bg-gray-50">
-                            {iconKeys.map(key => (
-                                <button
-                                    key={key}
-                                    onClick={() => setSelectedIcon(key)}
-                                    className={`flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all duration-200 
-                                        ${selectedIcon === key 
-                                            ? 'bg-indigo-100 border-indigo-600 shadow-md scale-105' 
-                                            : 'bg-white border-gray-200 hover:bg-gray-100'}`
-                                    }
-                                    disabled={isSaving}
-                                >
-                                    <LogoDisplay logoType="icon" logoSource={key} size={30} className="text-indigo-600" />
-                                    <span className="mt-1 text-xs text-gray-700">{key}</span>
-                                </button>
-                            ))}
-                        </div>
+                    <div className="mb-4 p-3 bg-red-100 border border-red-200 text-red-700 rounded-lg text-sm text-center font-medium">
+                        {error}
                     </div>
-                ) : (
-                    <div className="my-4 space-y-4">
-                        <p className="text-gray-600">Paste the URL of your logo image (e.g., JPEG, PNG):</p>
-                        <input
-                            type="url"
-                            value={customUrl}
-                            onChange={(e) => setCustomUrl(e.target.value)}
-                            placeholder="https://example.com/logo.png"
-                            className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                )}
+
+                <form onSubmit={handleLogin} className="space-y-6">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                        <input 
+                            type="email" 
+                            required 
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="admin@example.com"
                         />
-                        
-                        {customUrl.trim() && (
-                            <div className="pt-4 border-t">
-                                <p className="text-sm font-medium mb-2">Preview:</p>
-                                <div className="p-3 bg-gray-100 rounded-lg flex justify-center">
-                                    <LogoDisplay logoType="url" logoSource={customUrl} size={64} className="rounded-full shadow-lg" />
-                                </div>
-                            </div>
-                        )}
                     </div>
-                )}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                        <input 
+                            type="password" 
+                            required 
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="••••••••"
+                        />
+                    </div>
 
-
-                <div className="mt-6 flex justify-end space-x-3">
-                    <button
-                        onClick={closeModal}
-                        disabled={isSaving}
-                        className="px-6 py-2 text-sm font-semibold text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+                    <button 
+                        type="submit" 
+                        disabled={loading}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg shadow transition disabled:bg-indigo-300"
                     >
-                        Cancel
+                        {loading ? 'Verifying...' : 'Sign In'}
                     </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="px-8 py-2 text-sm font-bold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition disabled:bg-indigo-400"
-                    >
-                        {isSaving ? 'Saving...' : 'Save Logo'}
-                    </button>
-                </div>
+                    
+                    <div className="pt-6 border-t border-gray-100 mt-6">
+                         <p className="text-xs text-center text-gray-400 mb-3 uppercase tracking-wide">Quick Demo Access (Simulation)</p>
+                         <div className="grid grid-cols-3 gap-2">
+                             {[ROLES.OWNER, ROLES.ACCOUNTANT, ROLES.SALES].map(role => (
+                                 <button
+                                     key={role}
+                                     type="button"
+                                     onClick={() => onLogin(null, null, role)}
+                                     className="px-2 py-2 text-xs font-semibold rounded border bg-gray-50 hover:bg-gray-100 text-gray-600 truncate"
+                                 >
+                                     {role}
+                                 </button>
+                             ))}
+                         </div>
+                    </div>
+                </form>
             </div>
         </div>
     );
 };
 
-// --- Floor and Unit Manager Modal Component ---
-const FloorAndUnitManagerModal = ({ closeModal, db, totalFloors, setTotalFloors, floors, userId }) => {
-    const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState(null);
-    const [activeFloor, setActiveFloor] = useState(getOrdinal(1) + ' Floor');
-    
-    const unitsRef = collection(db, 'artifacts', appId, 'public', 'data', 'units');
-    const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-    
-    // List of floors for display
-    const floorList = useMemo(() => {
-        return Array.from({ length: totalFloors }, (_, i) => ({
-            num: i + 1,
-            name: getOrdinal(i + 1) + ' Floor'
-        }));
-    }, [totalFloors]);
+// 2. Sidebar
+const Sidebar = ({ currentView, setView, role, onLogout }) => {
+    const permissions = PERMISSIONS[role] || {};
 
-    // Handle Floor Count Change (Add/Remove Top Floor)
-    const handleFloorCountChange = async (delta) => {
-        if (!db || isSaving) return;
-        setError(null);
-        setIsSaving(true);
-        
-        const newMaxFloor = totalFloors + delta;
+    const menuItems = [
+        { id: 'overview', label: 'Overview', icon: Icons.Dashboard, visible: true },
+        { id: 'building', label: 'Building & Units', icon: Icons.Building, visible: true },
+        { id: 'config', label: 'Configuration', icon: Icons.Config, visible: permissions.canConfig }, // Merged Settings
+        { id: 'users', label: 'User Mgmt', icon: Icons.Users, visible: permissions.canManageUsers },
+    ];
 
-        if (newMaxFloor < 1) {
-            setError("Cannot reduce the building below 1 floor.");
-            setIsSaving(false);
-            return;
-        }
-
-        try {
-            const batch = writeBatch(db);
-
-            if (delta > 0) {
-                // ADD FLOOR
-                const floorToAdd = newMaxFloor;
-                console.log(`Adding floor ${floorToAdd}...`);
-                DEFAULT_UNIT_TYPES.forEach(unitId => {
-                    const unitData = createUnitData(floorToAdd, unitId);
-                    const unitDocRef = doc(unitsRef, unitData.id);
-                    batch.set(unitDocRef, unitData);
-                });
-            } else if (delta < 0) {
-                // REMOVE TOP FLOOR
-                const floorToRemove = totalFloors;
-                const floorNameToRemove = getOrdinal(floorToRemove) + ' Floor';
-
-                console.log(`Removing floor ${floorToRemove} (${floorNameToRemove})...`);
-
-                const q = query(unitsRef, where('floorName', '==', floorNameToRemove));
-                const snapshot = await getDocs(q);
-
-                if (snapshot.docs.length > 0) {
-                    snapshot.docs.forEach(doc => {
-                        batch.delete(doc.ref);
-                    });
-                } else {
-                    console.warn(`No units found for ${floorNameToRemove} to delete.`);
-                }
-            }
-
-            // Update the global totalFloors setting
-            batch.update(settingsRef, {
-                totalFloors: newMaxFloor,
-                lastUpdated: Timestamp.now(),
-                updatedBy: userId
-            });
-
-            await batch.commit();
-            setTotalFloors(newMaxFloor); // This will be updated by the listener, but set it locally for responsiveness
-        } catch (e) {
-            console.error('Error updating floor count:', e);
-            setError('Failed to update floors. Check the console for details.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    // Handle Unit Addition to a Specific Floor
-    const handleAddUnitToFloor = async (floorNum, floorName) => {
-        if (!db || isSaving) return;
-        setIsSaving(true);
-        setError(null);
-
-        try {
-            // Get current units on that floor to find the next ID
-            const unitsOnFloor = floors[floorName] || [];
-            const nextUnitId = getNextUnitId(unitsOnFloor);
+    return (
+        <div className="w-64 bg-white border-r border-gray-200 h-screen fixed left-0 top-0 flex flex-col z-20">
+            <div className="p-6 border-b border-gray-100">
+                <h2 className="text-2xl font-black text-indigo-800 tracking-tight">Skyline<span className="text-indigo-500">Tracker</span></h2>
+                <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">{role}</p>
+            </div>
             
-            const newUnitData = createUnitData(floorNum, nextUnitId);
-            const unitDocRef = doc(unitsRef, newUnitData.id);
+            <nav className="flex-1 p-4 space-y-1">
+                {menuItems.filter(item => item.visible).map(item => (
+                    <button
+                        key={item.id}
+                        onClick={() => setView(item.id)}
+                        className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 font-medium ${
+                            currentView === item.id 
+                                ? 'bg-indigo-50 text-indigo-700 shadow-sm' 
+                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                        }`}
+                    >
+                        <item.icon />
+                        <span>{item.label}</span>
+                    </button>
+                ))}
+            </nav>
 
-            // Adding a new unit is a simple set
-            await setDoc(unitDocRef, newUnitData);
+            <div className="p-4 border-t border-gray-100">
+                <button 
+                    onClick={onLogout}
+                    className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-xl transition"
+                >
+                    <Icons.Logout />
+                    <span>Sign Out</span>
+                </button>
+            </div>
+        </div>
+    );
+};
 
-        } catch (e) {
-            console.error('Error adding unit:', e);
-            setError(`Failed to add new unit. Error: ${e.message}`);
-        } finally {
-            setIsSaving(false);
-        }
-    };
+// 3. Header
+const Header = ({ role, notifications = [], userProfile, onOpenProfile }) => {
+    const [showNotifs, setShowNotifs] = useState(false);
+    const notifRef = useRef(null);
 
-    // Handle Unit Removal from a Specific Floor
-    const handleRemoveUnitFromFloor = async (unit) => {
-        if (!db || isSaving) return;
-        
-        // Custom confirmation dialog
-        const confirmed = window.confirm(`Are you sure you want to PERMANENTLY delete Unit ${unit.unitId} on the ${unit.floorName}? This action cannot be undone and will delete all sales data.`);
-        
-        if (!confirmed) return;
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (notifRef.current && !notifRef.current.contains(event.target)) setShowNotifs(false);
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
-        setIsSaving(true);
-        setError(null);
+    return (
+        <header className="h-16 bg-white border-b border-gray-200 fixed top-0 right-0 left-64 z-10 flex justify-between items-center px-8 shadow-sm">
+            <h2 className="text-lg font-semibold text-gray-700">Dashboard</h2>
+            
+            <div className="flex items-center space-x-6">
+                {/* Notifications */}
+                <div className="relative" ref={notifRef}>
+                    <button 
+                        onClick={() => setShowNotifs(!showNotifs)}
+                        className="relative text-gray-400 hover:text-indigo-600 transition"
+                    >
+                        <Icons.Bell />
+                        {notifications.length > 0 && (
+                            <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-xs text-white flex items-center justify-center border border-white">
+                                {notifications.length}
+                            </span>
+                        )}
+                    </button>
 
-        try {
-            const unitDocRef = doc(unitsRef, unit.id);
-            await deleteDoc(unitDocRef);
+                    {showNotifs && (
+                        <div className="absolute right-0 mt-3 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden ring-1 ring-black ring-opacity-5">
+                            <div className="p-3 bg-gray-50 border-b border-gray-100 font-semibold text-sm text-gray-700">
+                                Notifications ({notifications.length})
+                            </div>
+                            <div className="max-h-64 overflow-y-auto">
+                                {notifications.length === 0 ? (
+                                    <div className="p-4 text-sm text-gray-500 text-center">No pending reminders.</div>
+                                ) : (
+                                    notifications.map((n, i) => (
+                                        <div key={i} className="p-3 border-b border-gray-50 hover:bg-gray-50 transition">
+                                            <p className="text-sm font-medium text-gray-800">{n.title}</p>
+                                            <p className="text-xs text-gray-500">{n.msg}</p>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
 
-        } catch (e) {
-            console.error('Error deleting unit:', e);
-            setError(`Failed to delete unit ${unit.unitId}. Error: ${e.message}`);
-        } finally {
-            setIsSaving(false);
-        }
+                {/* Profile */}
+                <button 
+                    onClick={onOpenProfile}
+                    className="flex items-center space-x-3 border-l pl-6 border-gray-200 hover:opacity-80 transition"
+                >
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm">
+                        {userProfile?.fName?.[0] || role[0]}
+                    </div>
+                    <div className="hidden md:block text-left">
+                        <p className="text-sm font-medium text-gray-800">{userProfile?.fName || 'User'}</p>
+                        <p className="text-xs text-gray-500">{role}</p>
+                    </div>
+                </button>
+            </div>
+        </header>
+    );
+};
+
+// --- VIEWS ---
+
+const OverviewView = ({ stats, role }) => {
+    // Sales role: Read-only access to unit availability (financial totals are hidden).
+    const showFinancials = PERMISSIONS[role]?.viewFinancials && role !== ROLES.SALES;
+
+    return (
+        <div className="p-8 pt-24 min-h-screen bg-gray-50 space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-500 font-medium">Total Units</p>
+                    <p className="text-3xl font-bold text-gray-800 mt-2">{stats.totalUnits}</p>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-500 font-medium">Available</p>
+                    <p className="text-3xl font-bold text-green-600 mt-2">{stats.unitsAvailable}</p>
+                </div>
+                {showFinancials && (
+                    <>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <p className="text-sm text-gray-500 font-medium">Total Sales Value</p>
+                            <p className="text-3xl font-bold text-indigo-600 mt-2">{formatCurrency(stats.totalSalesValue)}</p>
+                        </div>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                            <p className="text-sm text-gray-500 font-medium">Total Collected</p>
+                            <p className="text-3xl font-bold text-emerald-600 mt-2">{formatCurrency(stats.totalCollected)}</p>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {/* Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <h3 className="text-lg font-bold text-gray-800 mb-6">Sales Performance</h3>
+                    <div className="flex items-end space-x-4 h-48 px-4">
+                        {['Avail', 'Held', 'Sold'].map((label, i) => {
+                            const val = i===0 ? stats.unitsAvailable : i===1 ? stats.unitsHeld : stats.unitsSold;
+                            const color = i===0 ? 'bg-green-500' : i===1 ? 'bg-yellow-500' : 'bg-red-500';
+                            const bg = i===0 ? 'bg-green-100' : i===1 ? 'bg-yellow-100' : 'bg-red-100';
+                            return (
+                                <div key={label} className="flex-1 flex flex-col items-center gap-2">
+                                    <div className={`w-full ${bg} rounded-t-lg relative h-full`}>
+                                        <div style={{ height: `${stats.totalUnits ? (val/stats.totalUnits)*100 : 0}%` }} className={`absolute bottom-0 w-full ${color} rounded-t-lg transition-all duration-500`}></div>
+                                    </div>
+                                    <span className="text-xs font-medium text-gray-500">{label}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+const BuildingView = ({ units, onUnitClick }) => {
+    // Group units by floor
+    const floors = useMemo(() => {
+        const grouped = {};
+        units.forEach(unit => {
+            if (!grouped[unit.floor]) grouped[unit.floor] = [];
+            grouped[unit.floor].push(unit);
+        });
+        return grouped;
+    }, [units]);
+
+    // Sort floor numbers descending (High floor at top)
+    const sortedFloorNums = useMemo(() => {
+        return Object.keys(floors).map(Number).sort((a, b) => a - b);
+    }, [floors]);
+
+    // INITIAL COLLAPSED STATE: Initially set all floor IDs as true (collapsed)
+    const [collapsed, setCollapsed] = useState(() => {
+        const initial = {};
+        Object.keys(floors).forEach(f => initial[f] = true);
+        return initial;
+    });
+
+    const toggleFloor = (floor) => {
+        setCollapsed(prev => ({ ...prev, [floor]: !prev[floor] }));
     };
 
 
     return (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-80 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 transition-all duration-300">
-                <div className="flex justify-between items-start border-b pb-3 mb-4">
-                    <h2 className="text-2xl font-extrabold text-indigo-700">Manage Building Structure & Units</h2>
-                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-700 transition">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-
-                {error && (
-                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-sm">{error}</div>
-                )}
-
-                <div className="space-y-6">
-                    {/* Floor Count Management */}
-                    <div className="p-4 border rounded-xl bg-gray-50 shadow-inner">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-2">Total Floors: {totalFloors}</h3>
-                        <p className="text-sm text-gray-600 mb-4">Add or remove the current top floor. This adds/deletes the default unit set (A, B, C).</p>
-                        
-                        <div className="flex space-x-4">
-                            <button
-                                onClick={() => handleFloorCountChange(1)}
-                                disabled={isSaving}
-                                className="flex-1 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition disabled:bg-indigo-400"
+        <div className="p-8 pt-24 min-h-screen bg-gray-50">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">Building Structure</h2>
+            
+            <div className="flex flex-col gap-4 max-w-6xl mx-auto">
+                {sortedFloorNums.map(floorNum => {
+                    const isCollapsed = collapsed[floorNum];
+                    return (
+                        <div key={floorNum} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden transition-all">
+                            {/* Collapsible Header */}
+                            <button 
+                                onClick={() => toggleFloor(floorNum)}
+                                className="w-full flex items-center justify-between p-4 bg-indigo-50 hover:bg-indigo-100 transition-colors"
                             >
-                                {isSaving ? 'Saving...' : 'Add Top Floor (+1)'}
+                                <div className="flex items-center gap-4">
+                                    <div className="h-10 w-10 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold shadow-sm">
+                                        {floorNum}
+                                    </div>
+                                    <div className="text-left">
+                                        <span className="block text-lg font-bold text-gray-800 leading-tight">
+                                            {getOrdinal(floorNum)} Floor
+                                        </span>
+                                        <span className="text-xs font-medium text-indigo-500">
+                                            {floors[floorNum].length} Units
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex -space-x-2 mr-4">
+                                        {/* Mini preview of status dots */}
+                                        {floors[floorNum].slice(0, 5).map(u => (
+                                            <div key={u.id} className={`w-3 h-3 rounded-full ring-2 ring-white ${
+                                                u.status === 'Available' ? 'bg-green-400' : u.status === 'Sold' ? 'bg-red-400' : 'bg-yellow-400'
+                                            }`} />
+                                        ))}
+                                    </div>
+                                    <svg 
+                                        className={`w-6 h-6 text-indigo-400 transition-transform duration-300 ${isCollapsed ? '' : 'rotate-180'}`} 
+                                        fill="none" 
+                                        stroke="currentColor" 
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </div>
                             </button>
-                            <button
-                                onClick={() => handleFloorCountChange(-1)}
-                                disabled={isSaving || totalFloors <= 1}
-                                className="flex-1 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition disabled:bg-red-400"
-                            >
-                                {isSaving ? 'Saving...' : 'Remove Top Floor (-1)'}
-                            </button>
+                            
+                            {/* Units Container (Collapsible) */}
+                            {!isCollapsed && (
+                                <div className="p-4 bg-white border-t border-indigo-100 animate-fadeIn">
+                                    <div className="flex flex-wrap gap-4 justify-start">
+                                        {floors[floorNum]
+                                            .sort((a, b) => a.unitId.localeCompare(b.unitId))
+                                            .map(unit => (
+                                                <button
+                                                    key={unit.id}
+                                                    onClick={() => onUnitClick(unit)}
+                                                    className={`
+                                                        relative w-28 h-24 rounded-lg border-2 transition-all duration-200 
+                                                        hover:shadow-md hover:-translate-y-1 flex flex-col justify-center items-center group
+                                                        ${getStatusColor(unit.status)}
+                                                    `}
+                                                >
+                                                    <span className="text-lg font-black">{unit.unitId}</span>
+                                                    <span className="text-[10px] uppercase font-bold opacity-80 mt-1">{unit.status}</span>
+                                                    <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-current opacity-50"></div>
+                                                </button>
+                                            ))
+                                        }
+                                    </div>
+                                </div>
+                            )}
                         </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
+// --- CONFIGURATION VIEW (Admin/Owner Only) ---
+const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) => {
+    const [backupStatus, setBackupStatus] = useState('idle');
+    const [activeFloor, setActiveFloor] = useState(null);
+    
+    // New Defaults State
+    const [defaultFloor, setDefaultFloor] = useState(1);
+    const [defaultUnitType, setDefaultUnitType] = useState('A');
+    const [defaultArea, setDefaultArea] = useState(100);
+    const [defaultPrice, setDefaultPrice] = useState(2000);
+    const [applyStatus, setApplyStatus] = useState('');
+
+    const floors = useMemo(() => {
+        const grouped = units.reduce((acc, unit) => {
+            const f = unit.floor;
+            if (!acc[f]) acc[f] = [];
+            acc[f].push(unit);
+            return acc;
+        }, {});
+        return grouped;
+    }, [units]);
+
+    const handleBackup = () => {
+        setBackupStatus('loading');
+        setTimeout(() => {
+            setBackupStatus('success');
+            setTimeout(() => setBackupStatus('idle'), 3000);
+        }, 2000);
+    };
+
+    const handleFloorUpdate = async (delta) => {
+        if (!db) return;
+        const newTotal = totalFloors + delta;
+        if (newTotal < 1) return;
+
+        const batch = writeBatch(db);
+        const settingsRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'settings', 'global');
+        const unitsRef = collection(db, 'artifacts', APP_ID, 'public', 'data', 'units');
+
+        if (delta > 0) {
+            DEFAULT_UNIT_TYPES.forEach(uid => {
+                const u = createUnitData(newTotal, uid);
+                batch.set(doc(unitsRef, u.id), u);
+            });
+        } else {
+            const q = query(unitsRef, where('floor', '==', totalFloors));
+            const snap = await getDocs(q);
+            snap.forEach(d => batch.delete(d.ref));
+        }
+
+        batch.update(settingsRef, { totalFloors: newTotal, updatedBy: userId });
+        await batch.commit();
+        setTotalFloors(newTotal); 
+    };
+
+    const handleApplyDefaults = async () => {
+        setApplyStatus('Applying...');
+        try {
+            // Find units matching floor AND unit type (e.g. F01-A)
+            const unitsToUpdate = units.filter(u => u.floor === Number(defaultFloor) && u.unitId === defaultUnitType);
+            const batch = writeBatch(db);
+            
+            unitsToUpdate.forEach(u => {
+                const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', u.id);
+                batch.update(ref, {
+                    areaSqm: Number(defaultArea),
+                    pricePerSqm: Number(defaultPrice),
+                    totalPrice: Number(defaultArea) * Number(defaultPrice),
+                    updatedBy: userId
+                });
+            });
+
+            await batch.commit();
+            setApplyStatus('Defaults Applied!');
+            setTimeout(() => setApplyStatus(''), 3000);
+        } catch (e) {
+            setApplyStatus('Error applying');
+        }
+    };
+
+    return (
+        <div className="p-8 pt-24 min-h-screen bg-gray-50">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">System Configuration</h2>
+            
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                {/* Left Column: Defaults & Backup */}
+                <div className="space-y-6">
+                    {/* Unit Default Pricing */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4">Unit Default Pricing & Area</h3>
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Floor</label>
+                                <select value={defaultFloor} onChange={e => setDefaultFloor(e.target.value)} className="w-full p-2 border rounded">
+                                    {Array.from({length: totalFloors}, (_, i) => i+1).map(f => <option key={f} value={f}>{f} Floor</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Unit Type</label>
+                                <select value={defaultUnitType} onChange={e => setDefaultUnitType(e.target.value)} className="w-full p-2 border rounded">
+                                    {DEFAULT_UNIT_TYPES.map(t => <option key={t} value={t}>Unit {t}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Default Area (sqm)</label>
+                                <input type="number" value={defaultArea} onChange={e => setDefaultArea(e.target.value)} className="w-full p-2 border rounded" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Default Price/sqm ($)</label>
+                                <MoneyInput value={defaultPrice} onChange={setDefaultPrice} className="w-full p-2 border rounded" />
+                            </div>
+                        </div>
+                        <button onClick={handleApplyDefaults} className="w-full py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 transition">
+                            {applyStatus || 'Apply Default Values to Units'}
+                        </button>
                     </div>
 
-                    {/* Floor-by-Floor Unit Management */}
-                    <div className="p-4 border rounded-xl bg-white shadow-md">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-3">Unit Management (Floor-by-Floor)</h3>
-                        <div className="max-h-96 overflow-y-auto space-y-2">
-                            {floorList.map(floor => (
-                                <div key={floor.num} className="border border-gray-200 rounded-lg">
-                                    <button 
-                                        onClick={() => setActiveFloor(floor.name === activeFloor ? null : floor.name)}
-                                        className={`w-full text-left p-3 flex justify-between items-center transition duration-200 ${activeFloor === floor.name ? 'bg-indigo-50 font-bold text-indigo-700' : 'bg-gray-100 hover:bg-gray-200'}`}
-                                    >
-                                        <span>{floor.name}</span>
-                                        <svg className={`w-4 h-4 transform ${activeFloor === floor.name ? 'rotate-180' : 'rotate-0'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                    </button>
+                    {/* Database Actions */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4">Database Operations</h3>
+                        <div className="flex gap-4">
+                            <button 
+                                onClick={handleBackup}
+                                disabled={backupStatus !== 'idle'}
+                                className={`flex-1 px-4 py-3 rounded-lg font-medium transition flex justify-center items-center space-x-2 ${
+                                    backupStatus === 'success' ? 'bg-green-100 text-green-700' : 'bg-gray-800 text-white hover:bg-gray-900'
+                                }`}
+                            >
+                                <span>{backupStatus === 'loading' ? 'Backing up...' : backupStatus === 'success' ? 'Backup Successful' : 'Simulate Backup'}</span>
+                            </button>
+                            <button className="flex-1 px-4 py-3 rounded-lg font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">Export Logs</button>
+                        </div>
+                    </div>
+                </div>
 
-                                    {activeFloor === floor.name && (
-                                        <div className="p-4 bg-white border-t space-y-3">
-                                            <div className="flex flex-wrap gap-2 items-center">
-                                                <p className="font-semibold text-sm text-gray-600 mr-2">Units on Floor:</p>
-                                                
-                                                {/* Units List - MUST SORT UNITS ON FLOOR IN JS */}
-                                                {(floors[floor.name] || []).sort((a, b) => a.unitId.localeCompare(b.unitId)).map(unit => (
-                                                    <div key={unit.id} className="flex items-center space-x-1 p-1 px-2 border rounded-full text-xs bg-indigo-50">
-                                                        <span>{unit.unitId} ({unit.beds}B)</span>
-                                                        <button 
-                                                            onClick={() => handleRemoveUnitFromFloor(unit)}
-                                                            disabled={isSaving}
-                                                            className="text-red-500 hover:text-red-700 disabled:text-gray-400"
-                                                            title={`Remove Unit ${unit.unitId}`}
-                                                        >
-                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                                                        </button>
+                {/* Right Column: Structure Management */}
+                <div className="space-y-6">
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                         <h3 className="text-lg font-bold text-gray-800 mb-4">Building Height</h3>
+                         <div className="flex justify-between items-center">
+                             <p className="text-2xl font-bold text-indigo-600">{totalFloors} Floors</p>
+                             <div className="space-x-2">
+                                 <button onClick={() => handleFloorUpdate(1)} className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200">+ Add Floor</button>
+                                 <button onClick={() => handleFloorUpdate(-1)} className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">- Remove</button>
+                             </div>
+                         </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[400px] flex flex-col">
+                        <h3 className="text-lg font-bold text-gray-800 mb-4">Floor Detail Mgmt</h3>
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                            {Array.from({ length: totalFloors }, (_, i) => i + 1).map(floorNum => (
+                                <div key={floorNum} className="border border-gray-200 rounded-lg overflow-hidden">
+                                    <button 
+                                        onClick={() => setActiveFloor(activeFloor === floorNum ? null : floorNum)}
+                                        className={`w-full flex justify-between items-center p-3 text-sm font-medium transition ${activeFloor === floorNum ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 hover:bg-gray-100'}`}
+                                    >
+                                        <span>{getOrdinal(floorNum)} Floor</span>
+                                        <span>{(floors[floorNum] || []).length} Units</span>
+                                    </button>
+                                    
+                                    {activeFloor === floorNum && (
+                                        <div className="p-3 bg-white border-t border-gray-100">
+                                            <div className="flex flex-wrap gap-2 mb-3">
+                                                {(floors[floorNum] || []).sort((a,b) => a.unitId.localeCompare(b.unitId)).map(u => (
+                                                    <div key={u.id} className="flex items-center bg-gray-100 rounded px-2 py-1 text-xs">
+                                                        <span className="font-semibold mr-2">{u.unitId}</span>
+                                                        <button onClick={async () => {
+                                                            if(window.confirm('Delete unit?')) await deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', u.id));
+                                                        }} className="text-red-400 hover:text-red-600">×</button>
                                                     </div>
                                                 ))}
-
-                                                {/* Add Unit Button */}
-                                                <button
-                                                    onClick={() => handleAddUnitToFloor(floor.num, floor.name)}
-                                                    disabled={isSaving}
-                                                    className="px-3 py-1 text-xs font-semibold text-white bg-green-600 rounded-full hover:bg-green-700 transition disabled:bg-green-300 ml-4"
-                                                >
-                                                    {isSaving ? 'Adding...' : 'Add Unit'}
-                                                </button>
                                             </div>
-                                            <p className="text-xs text-red-500 italic">
-                                                Warning: Removing a unit will delete its ID and any sales data associated with it.
-                                            </p>
+                                            <button 
+                                                onClick={async () => {
+                                                    const nextId = getNextUnitId(floors[floorNum] || []);
+                                                    const u = createUnitData(floorNum, nextId);
+                                                    await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', u.id), u);
+                                                }}
+                                                className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 transition font-medium"
+                                            >
+                                                + Add Next Unit
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -599,1093 +739,660 @@ const FloorAndUnitManagerModal = ({ closeModal, db, totalFloors, setTotalFloors,
                         </div>
                     </div>
                 </div>
-
-                <div className="mt-6 flex justify-end">
-                    <button
-                        onClick={closeModal}
-                        className="px-6 py-2 text-sm font-semibold text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition flex items-center"
-                    >
-                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                        Back to Dashboard
-                    </button>
-                </div>
             </div>
         </div>
     );
 };
 
+// --- USER MANAGEMENT VIEW (System Admin Only) ---
+const UserManagementView = ({ db }) => {
+    const [users, setUsers] = useState([]);
+    
+    // Form State
+    const [newUser, setNewUser] = useState({
+        email: '', password: '', role: ROLES.SALES, fName: '', lName: '', sex: 'M', age: '', phone: ''
+    });
+    const [formError, setFormError] = useState('');
+    const [resetUser, setResetUser] = useState(null); // ID of user being reset
 
-// --- Edit Modal Component ---
-const EditModal = ({ unit, closeModal, db, userId }) => {
+    useEffect(() => {
+        if (!db) return;
+        const q = query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'users'));
+        const unsub = onSnapshot(q, snap => {
+            setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+        return unsub;
+    }, [db]);
+
+    const validatePassword = (pwd) => {
+        const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+        return regex.test(pwd);
+    };
+
+    const handleCreateUser = async (e) => {
+        e.preventDefault();
+        setFormError('');
+        
+        if (!validatePassword(newUser.password)) {
+            setFormError('Password must be >8 chars, with uppercase, number, & special char.');
+            return;
+        }
+
+        try {
+            const userId = Math.random().toString(36).substring(2, 15); // Simulated UID
+            const userData = { ...newUser, id: userId, createdAt: Timestamp.now() };
+            if (newUser.role === ROLES.OWNER) {
+                delete userData.sex;
+                delete userData.age;
+                delete userData.phone;
+            }
+
+            await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', userId), userData);
+            setNewUser({ email: '', password: '', role: ROLES.SALES, fName: '', lName: '', sex: 'M', age: '', phone: '' });
+            alert('User created successfully (Simulated)');
+        } catch (err) {
+            setFormError(err.message);
+        }
+    };
+
+    const deleteUser = async (id) => {
+        if(window.confirm('Delete this user?')) {
+            await deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', id));
+        }
+    };
+
+    // Admin Reset Password Modal
+    const ResetPasswordModal = ({ userId, onClose }) => {
+        const [newPwd, setNewPwd] = useState('');
+        const [confirmPwd, setConfirmPwd] = useState('');
+        const [error, setError] = useState('');
+        const [success, setSuccess] = useState(false);
+
+        const handleReset = async () => {
+            if (newPwd !== confirmPwd) { setError("Passwords do not match"); return; }
+            if (!validatePassword(newPwd)) { setError("Password too weak."); return; }
+            
+            try {
+                await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', userId), { password: newPwd });
+                setSuccess(true);
+                setTimeout(() => onClose(), 1500); // Close after showing success
+            } catch (e) {
+                setError("Error updating password.");
+            }
+        };
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
+                <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-xl transform transition-all scale-100">
+                    {success ? (
+                        <div className="flex flex-col items-center justify-center py-6 text-green-600 animate-pulse">
+                            <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <h3 className="font-bold text-xl">Changed Successfully!</h3>
+                        </div>
+                    ) : (
+                        <>
+                            <h3 className="font-bold text-xl text-gray-800 mb-1">Reset Password</h3>
+                            <p className="text-gray-500 text-sm mb-4">Set a new password for this user.</p>
+                            
+                            {error && <p className="text-red-600 text-xs bg-red-50 p-2 rounded mb-3 border border-red-100">{error}</p>}
+                            
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase">New Password</label>
+                                    <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500 uppercase">Confirm Password</label>
+                                    <input type="password" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                </div>
+                            </div>
+                            
+                            <div className="flex justify-end gap-3 mt-6">
+                                <button onClick={onClose} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg">Cancel</button>
+                                <button onClick={handleReset} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-sm">Reset Password</button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
+    return (
+        <div className="p-8 pt-24 min-h-screen bg-gray-50">
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">User Management</h2>
+            
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                {/* User List */}
+                <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">User</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Role</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Details</th>
+                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {users.map(u => (
+                                <tr key={u.id} className="hover:bg-gray-50">
+                                    <td className="p-4">
+                                        <div className="text-sm font-bold text-gray-800">{u.fName} {u.lName}</div>
+                                        <div className="text-xs text-gray-500">{u.email}</div>
+                                    </td>
+                                    <td className="p-4"><span className="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700">{u.role}</span></td>
+                                    <td className="p-4 text-xs text-gray-500">
+                                        {u.role !== ROLES.OWNER && u.phone && <div>{u.phone}</div>}
+                                    </td>
+                                    <td className="p-4 text-right space-x-2">
+                                        <button onClick={() => setResetUser(u.id)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">Reset Pwd</button>
+                                        <button onClick={() => deleteUser(u.id)} className="text-red-600 hover:text-red-800 text-xs font-medium">Delete</button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Create User Form */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4">Add New User</h3>
+                    {formError && <div className="mb-4 text-xs text-red-600 bg-red-50 p-2 rounded">{formError}</div>}
+                    <form onSubmit={handleCreateUser} className="space-y-3">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-500 mb-1">Role</label>
+                            <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})} className="w-full p-2 border rounded text-sm">
+                                {Object.values(ROLES).map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-2">
+                            <input type="text" placeholder="First Name" required value={newUser.fName} onChange={e => setNewUser({...newUser, fName: e.target.value})} className="p-2 border rounded text-sm" />
+                            <input type="text" placeholder="Last Name" required value={newUser.lName} onChange={e => setNewUser({...newUser, lName: e.target.value})} className="p-2 border rounded text-sm" />
+                        </div>
+
+                        <input type="email" placeholder="Email Address" required value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} className="w-full p-2 border rounded text-sm" />
+                        <input type="password" placeholder="Password" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full p-2 border rounded text-sm" />
+
+                        {/* Extended Info: Hidden for Owner Role */}
+                        {newUser.role !== ROLES.OWNER && (
+                            <div className="space-y-3 pt-2 border-t border-gray-100">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <select value={newUser.sex} onChange={e => setNewUser({...newUser, sex: e.target.value})} className="p-2 border rounded text-sm">
+                                        <option value="M">Male</option>
+                                        <option value="F">Female</option>
+                                    </select>
+                                    <input type="number" placeholder="Age" required value={newUser.age} onChange={e => setNewUser({...newUser, age: e.target.value})} className="p-2 border rounded text-sm" />
+                                </div>
+                                <input type="tel" placeholder="Phone Number" required value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} className="w-full p-2 border rounded text-sm" />
+                            </div>
+                        )}
+
+                        <button type="submit" className="w-full py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 transition mt-4">Create User</button>
+                    </form>
+                </div>
+            </div>
+            {resetUser && <ResetPasswordModal userId={resetUser} onClose={() => setResetUser(null)} />}
+        </div>
+    );
+};
+
+// --- MODALS ---
+
+const ProfileModal = ({ userProfile, onClose, onSave }) => {
+    const [data, setData] = useState({ fName: '', lName: '', phone: '' });
+    const [mode, setMode] = useState('profile'); // 'profile' or 'password'
+    
+    // Password change state
+    const [pwData, setPwData] = useState({ old: '', new: '', confirm: '' });
+    const [pwError, setPwError] = useState('');
+    const [pwSuccess, setPwSuccess] = useState(false);
+
+    useEffect(() => {
+        if(userProfile) setData({ fName: userProfile.fName || '', lName: userProfile.lName || '', phone: userProfile.phone || '' });
+    }, [userProfile]);
+
+    const handleChangePassword = () => {
+        setPwError('');
+        if (pwData.old !== userProfile.password) {
+            setPwError("Old password incorrect.");
+            return;
+        }
+        if (pwData.new !== pwData.confirm) {
+            setPwError("New passwords do not match.");
+            return;
+        }
+        // Save new password
+        onSave({ ...userProfile, password: pwData.new });
+        
+        // Show success state
+        setPwSuccess(true);
+        setTimeout(() => {
+            setPwSuccess(false);
+            setMode('profile');
+            setPwData({ old: '', new: '', confirm: '' });
+        }, 1500);
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 overflow-hidden">
+                {pwSuccess ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-green-600 animate-fadeIn">
+                        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+                        </div>
+                        <h3 className="font-bold text-xl">Password Changed Successfully!</h3>
+                    </div>
+                ) : (
+                    <>
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">{mode === 'profile' ? 'My Profile' : 'Change Password'}</h3>
+                        
+                        {mode === 'profile' ? (
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500">First Name</label>
+                                        <input type="text" value={data.fName} onChange={e => setData({...data, fName: e.target.value})} className="w-full p-2 border rounded" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500">Last Name</label>
+                                        <input type="text" value={data.lName} onChange={e => setData({...data, lName: e.target.value})} className="w-full p-2 border rounded" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-bold text-gray-500">Phone</label>
+                                    <input type="text" value={data.phone} onChange={e => setData({...data, phone: e.target.value})} className="w-full p-2 border rounded" />
+                                </div>
+                                <button onClick={() => setMode('password')} className="text-indigo-600 text-sm font-semibold hover:underline">Change Password</button>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                {pwError && <p className="text-red-500 text-sm bg-red-50 p-2 rounded border border-red-100">{pwError}</p>}
+                                <input type="password" placeholder="Old Password" value={pwData.old} onChange={e => setPwData({...pwData, old: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                <input type="password" placeholder="New Password" value={pwData.new} onChange={e => setPwData({...pwData, new: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                <input type="password" placeholder="Confirm New Password" value={pwData.confirm} onChange={e => setPwData({...pwData, confirm: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            </div>
+                        )}
+
+                        <div className="mt-6 flex justify-end space-x-3">
+                            <button onClick={() => mode === 'password' ? setMode('profile') : onClose()} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded">
+                                {mode === 'password' ? 'Back' : 'Cancel'}
+                            </button>
+                            <button onClick={() => mode === 'password' ? handleChangePassword() : onSave(data)} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700">
+                                {mode === 'password' ? 'Change Password' : 'Save'}
+                            </button>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const EditModal = ({ unit, closeModal, db, role, userId }) => {
+    const canEdit = PERMISSIONS[role].canEdit;
+    
+    // State
     const [status, setStatus] = useState(unit.status);
     const [clientName, setClientName] = useState(unit.clientName);
+    const [areaSqm, setAreaSqm] = useState(unit.areaSqm);
+    const [pricePerSqm, setPricePerSqm] = useState(unit.pricePerSqm);
     
-    // NEW STATE: Area and Price per Sqm replace manual totalPrice input
-    const [areaSqm, setAreaSqm] = useState(unit.areaSqm || 0);
-    const [pricePerSqm, setPricePerSqm] = useState(unit.pricePerSqm || 0);
-    
-    // Payment Schedule state
+    // SALES LOGIC STATE
     const [schedule, setSchedule] = useState(unit.paymentSchedule.map(p => ({
         ...p,
-        // Ensure reminderEnabled defaults to false if not present
-        reminderEnabled: p.reminderEnabled || false, 
-        // Convert Firestore Timestamp to string for input type="date" and ID for list keying
         dueDate: p.dueDate instanceof Timestamp ? p.dueDate.toDate().toISOString().substring(0, 10) : p.dueDate,
         id: p.id || Math.random().toString(36).substring(2, 9)
     })));
-    
     const [newInstallment, setNewInstallment] = useState({ amount: '', date: '' });
-    const [error, setError] = useState(null);
-    const [isSaving, setIsSaving] = useState(false);
-
-    // DERIVED: Calculate Total Price based on Area and PricePerSqm inputs
-    const totalPrice = useMemo(() => {
-        const area = Number(areaSqm);
-        const price = Number(pricePerSqm);
-        if (isNaN(area) || isNaN(price) || area < 0 || price < 0) return 0;
-        return area * price;
-    }, [areaSqm, pricePerSqm]);
-
-    // Derived Financials from Schedule
-    const derivedFinancials = useMemo(() => {
-        // Calculate the current financial stats based on the transient 'schedule' state
-        return calculateFinancialsFromSchedule(schedule.map(item => ({
-            ...item,
-            // Convert back to Date/Timestamp for accurate calculation
-            dueDate: new Date(item.dueDate)
-        })));
-    }, [schedule]);
-
-    const amountPaid = derivedFinancials.amountPaid;
-    const totalScheduled = derivedFinancials.totalScheduled;
-    const remainingAmount = totalPrice - amountPaid;
-    const isEngaged = status === 'Held' || status === 'Sold';
     
-    // Sort schedule for display
-    const sortedSchedule = useMemo(() => {
-        return [...schedule].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-    }, [schedule]);
+    // Calculated
+    const totalPrice = areaSqm * pricePerSqm;
+    const financials = useMemo(() => calculateFinancialsFromSchedule(schedule.map(s => ({ ...s, dueDate: new Date(s.dueDate) }))), [schedule]);
 
-    // Handle Schedule Updates
+    // Sales Agent Permission Check for SOLD units
+    const isSalesAgent = role === ROLES.SALES;
+    const isSold = unit.status === 'Sold';
+    // If it's a sales agent and the unit is SOLD, they cannot see financial details
+    const hideFinancials = isSalesAgent && isSold;
+
     const handleAddInstallment = () => {
-        if (Number(newInstallment.amount) <= 0 || !newInstallment.date) {
-            setError('Please enter a valid amount and date for the new installment.');
-            return;
-        }
-        
-        const newPayment = {
-            id: Math.random().toString(36).substring(2, 9), // Unique ID for keying/editing
+        if (!newInstallment.amount || !newInstallment.date) return;
+        setSchedule([...schedule, {
+            id: Math.random().toString(36).substring(2,9),
             amount: Number(newInstallment.amount),
             dueDate: newInstallment.date,
-            status: 'Pending',
-            reminderEnabled: false, // Default new installment reminder to false
-        };
-
-        setSchedule([...schedule, newPayment]);
+            status: 'Pending'
+        }]);
         setNewInstallment({ amount: '', date: '' });
-        setError(null);
     };
 
-    const handleUpdateInstallment = (id, field, value) => {
-        setSchedule(schedule.map(item => {
-            if (item.id === id) {
-                let updatedValue = value;
-                if (field === 'amount') {
-                    updatedValue = Number(value);
-                } else if (field === 'reminderEnabled') {
-                    // Toggle boolean state
-                    updatedValue = !item.reminderEnabled;
-                }
-                return { ...item, [field]: updatedValue };
-            }
-            return item;
-        }));
-    };
+    const handleRemoveInstallment = (id) => setSchedule(schedule.filter(s => s.id !== id));
 
-    const handleRemoveInstallment = (id) => {
-        setSchedule(schedule.filter(item => item.id !== id));
+    const handleUpdateInstallment = (id, field, val) => {
+        setSchedule(schedule.map(s => s.id === id ? { ...s, [field]: field === 'amount' ? Number(val) : val } : s));
     };
-
 
     const handleSave = async () => {
-        if (isEngaged && (!clientName || totalPrice <= 0)) {
-            setError('Client Name and the calculated Total Price must be greater than zero for Held or Sold units.');
-            return;
-        }
-        
-        const numericTotalPrice = totalPrice; // Use the calculated price
-        const financials = calculateFinancialsFromSchedule(schedule.map(item => ({
-            ...item,
-            dueDate: new Date(item.dueDate)
-        })));
-
-        if (isEngaged && financials.totalScheduled !== numericTotalPrice) {
-            // Note: Using window.confirm() as a substitute for a custom modal confirmation dialog
-            const confirmed = window.confirm(`The sum of all installments ($${financials.totalScheduled.toLocaleString()}) does not equal the calculated Total Price ($${numericTotalPrice.toLocaleString()}). Continue and save anyway?`);
-            if (!confirmed) return;
+        if (!db) return;
+        if ((status === 'Held' || status === 'Sold') && financials.totalScheduled !== totalPrice) {
+            if(!window.confirm(`Warning: Scheduled total ($${financials.totalScheduled}) does not match Total Price ($${totalPrice}). Save anyway?`)) return;
         }
 
-        setError(null);
-        setIsSaving(true);
+        const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', unit.id);
+        const scheduleToSave = schedule.map(s => ({
+            id: s.id, amount: s.amount, status: s.status, dueDate: Timestamp.fromDate(new Date(s.dueDate))
+        }));
 
-        try {
-            const unitRef = doc(db, 'artifacts', appId, 'public', 'data', 'units', unit.id);
-            
-            // Prepare the schedule for Firestore (convert string dates back to Timestamps)
-            const scheduleForFirestore = schedule.map(item => ({
-                id: item.id,
-                amount: item.amount,
-                status: item.status,
-                reminderEnabled: item.reminderEnabled || false, // Ensure this flag is saved
-                dueDate: Timestamp.fromDate(new Date(item.dueDate))
-            }));
-
-            const updateData = {
-                // Always save base unit data (area and price per sqm)
-                areaSqm: Number(areaSqm),
-                pricePerSqm: Number(pricePerSqm),
-                totalPrice: numericTotalPrice, // Save the calculated price
-                
-                status: status,
-                updatedBy: userId,
-                updatedAt: Timestamp.now(),
-            };
-
-            if (isEngaged) {
-                updateData.clientName = clientName;
-                updateData.paymentSchedule = scheduleForFirestore;
-                // Update derived fields
-                updateData.amountPaid = financials.amountPaid;
-                updateData.nextPaymentDate = financials.nextPaymentDate;
-            } else {
-                // Clear all financial/client data if status goes back to Available
-                updateData.clientName = '';
-                updateData.amountPaid = 0;
-                updateData.nextPaymentDate = null;
-                updateData.paymentSchedule = [];
-            }
-
-            await updateDoc(unitRef, updateData);
-            closeModal();
-
-        } catch (e) {
-            console.error('Error updating document: ', e);
-            setError('Failed to save changes. Please check console for details.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const getStatusColor = (s) => {
-        switch (s) {
-            case 'Available': return 'text-green-600 bg-green-100 border-green-300';
-            case 'Held': return 'text-yellow-600 bg-yellow-100 border-yellow-300';
-            case 'Sold': return 'text-red-600 bg-red-100 border-red-300';
-            default: return 'text-gray-600 bg-gray-100 border-gray-300';
-        }
+        await updateDoc(ref, {
+            status,
+            clientName: (status === 'Available') ? '' : clientName,
+            areaSqm: Number(areaSqm),
+            pricePerSqm: Number(pricePerSqm),
+            totalPrice,
+            paymentSchedule: (status === 'Available') ? [] : scheduleToSave,
+            amountPaid: (status === 'Available') ? 0 : financials.amountPaid,
+            nextPaymentDate: (status === 'Available') ? null : financials.nextPaymentDate,
+            updatedBy: userId,
+            updatedAt: Timestamp.now()
+        });
+        closeModal();
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 overflow-y-auto">
-            <div className={`bg-white rounded-xl shadow-2xl w-full max-w-2xl my-8 p-6 transition-all duration-300 transform scale-100`}>
-                <div className="flex justify-between items-start border-b pb-3 mb-4">
-                    <h2 className="text-2xl font-extrabold text-gray-800">
-                        Update Unit {unit.floorName} - {unit.unitId}
-                    </h2>
-                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-700 transition">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
+                <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-800">Unit {unit.unitId} - {unit.floorName}</h3>
+                        <p className="text-xs text-gray-500 mt-1">{canEdit ? 'Edit Mode' : 'Read-Only Mode'}</p>
+                    </div>
+                    <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 </div>
 
-                {error && (
-                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-sm">{error}</div>
-                )}
-
-                <div className="space-y-6">
+                <div className="p-6 overflow-y-auto space-y-6 flex-1">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                        <select
-                            value={status}
-                            onChange={(e) => setStatus(e.target.value)}
-                            className={`w-full p-3 border rounded-lg shadow-sm focus:ring-2 ${getStatusColor(status)} appearance-none transition-colors duration-200`}
-                        >
+                        <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Unit Status</label>
+                        <select disabled={!canEdit} value={status} onChange={(e) => setStatus(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60">
                             <option value="Available">Available</option>
-                            <option value="Held">Held (Deposit Received)</option>
-                            <option value="Sold">Sold (Contract Signed)</option>
+                            <option value="Held">Held (Deposit)</option>
+                            <option value="Sold">Sold (Contract)</option>
                         </select>
                     </div>
 
-                    {/* NEW: Area and Price Per Sqm Inputs */}
-                    <div className="grid grid-cols-2 gap-4 border p-4 rounded-xl bg-gray-50">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Area (sqm)</label>
-                            <input
-                                type="number"
-                                value={areaSqm}
-                                onChange={(e) => setAreaSqm(e.target.value)}
-                                placeholder="100"
-                                min="0"
-                                className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                            />
+                    {hideFinancials ? (
+                        <div className="p-8 bg-gray-50 rounded-xl text-center border border-gray-100">
+                            <h4 className="text-lg font-bold text-gray-800 mb-2">Unit Sold</h4>
+                            <p className="text-gray-500 text-sm">This unit has been sold. Financial details and client information are restricted to Admin and Owner roles.</p>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Price per sqm ($)</label>
-                            <input
-                                type="number"
-                                value={pricePerSqm}
-                                onChange={(e) => setPricePerSqm(e.target.value)}
-                                placeholder="2000"
-                                min="0"
-                                className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                            />
-                        </div>
-                        
-                        {/* READ-ONLY: Total Price based on inputs */}
-                        <div className="col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Calculated Total Price ($)</label>
-                            <input
-                                type="text"
-                                value={totalPrice.toLocaleString()}
-                                readOnly
-                                className="w-full p-3 border border-indigo-400 bg-indigo-50 font-bold rounded-lg shadow-sm"
-                            />
-                            <p className="mt-1 text-xs text-gray-500">
-                                This is automatically calculated: {Number(areaSqm).toLocaleString()} sqm &times; ${Number(pricePerSqm).toLocaleString()}/sqm.
-                            </p>
-                        </div>
-                    </div>
-                
-                    {isEngaged && (
-                        <div className="space-y-4 border p-4 rounded-xl bg-gray-50">
-                            <h3 className="text-lg font-bold text-indigo-700">Client & Payment Details</h3>
-                            
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Client Name</label>
-                                <input
-                                    type="text"
-                                    value={clientName}
-                                    onChange={(e) => setClientName(e.target.value)}
-                                    placeholder="Enter Client Name"
-                                    className="w-full p-3 border border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            {/* --- Financial Summary --- */}
-                            <div className="grid grid-cols-3 gap-2 text-center text-sm font-medium border-t pt-3 mt-4">
-                                <div className="p-2 bg-green-100 rounded-lg">
-                                    <span className="text-xs text-green-700 block">PAID</span>
-                                    <span className="text-lg font-extrabold text-green-800">${amountPaid.toLocaleString()}</span>
+                    ) : (
+                        <>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Area (sqm)</label>
+                                    <input type="number" disabled={!canEdit} value={areaSqm} onChange={(e) => setAreaSqm(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60" />
                                 </div>
-                                <div className="p-2 bg-red-100 rounded-lg">
-                                    <span className="text-xs text-red-700 block">REMAINING</span>
-                                    <span className="text-lg font-extrabold text-red-800">${remainingAmount.toLocaleString()}</span>
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Price/sqm ($)</label>
+                                    <MoneyInput disabled={!canEdit} value={pricePerSqm} onChange={setPricePerSqm} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60" />
                                 </div>
-                                <div className="p-2 bg-indigo-100 rounded-lg">
-                                    <span className="text-xs text-indigo-700 block">SCHEDULED TOTAL</span>
-                                    <span className="text-lg font-extrabold text-indigo-800">${totalScheduled.toLocaleString()}</span>
+                                <div className="col-span-2 bg-indigo-50 p-4 rounded-xl flex justify-between items-center border border-indigo-100">
+                                    <span className="text-indigo-800 font-medium">Total Price</span>
+                                    <span className="text-xl font-black text-indigo-700">{formatCurrency(totalPrice)}</span>
                                 </div>
                             </div>
 
-                            {/* --- Installment Payment Schedule --- */}
-                            <h3 className="text-lg font-bold text-indigo-700 pt-4 border-t">Installment Payment Schedule ({sortedSchedule.length})</h3>
+                            {(status === 'Held' || status === 'Sold') && (
+                                <div className="pt-4 border-t border-gray-100 space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Client Name</label>
+                                        <input type="text" disabled={!canEdit} value={clientName} onChange={(e) => setClientName(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl disabled:opacity-60" placeholder="Enter client name..." />
+                                    </div>
 
-                            <div className="max-h-60 overflow-y-auto space-y-2">
-                                {sortedSchedule.length === 0 ? (
-                                    <p className="text-gray-500 italic text-center">No installments scheduled yet.</p>
-                                ) : (
-                                    sortedSchedule.map((item, index) => (
-                                        <div key={item.id} className={`p-3 border rounded-lg flex flex-col md:flex-row items-start md:items-center gap-3 transition-colors ${item.status === 'Paid' ? 'bg-green-50 border-green-300' : 'bg-yellow-50 border-yellow-300'}`}>
-                                            
-                                            <div className="flex-1 min-w-0 w-full md:w-auto">
-                                                <div className="flex gap-2 mb-1">
-                                                    <input
-                                                        type="number"
-                                                        value={item.amount}
-                                                        onChange={(e) => handleUpdateInstallment(item.id, 'amount', e.target.value)}
-                                                        className="w-2/5 p-1 border rounded text-sm font-semibold"
-                                                        min="1"
-                                                        disabled={item.status === 'Paid'}
-                                                    />
-                                                    <input
-                                                        type="date"
-                                                        value={item.dueDate}
-                                                        onChange={(e) => handleUpdateInstallment(item.id, 'dueDate', e.target.value)}
-                                                        className="w-3/5 p-1 border rounded text-sm"
-                                                        disabled={item.status === 'Paid'}
-                                                    />
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="p-3 bg-green-50 border border-green-100 rounded-xl text-center"><p className="text-xs font-bold text-green-600 uppercase">Paid</p><p className="text-lg font-black text-green-800">{formatCurrency(financials.amountPaid)}</p></div>
+                                        <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-center"><p className="text-xs font-bold text-red-600 uppercase">Remaining</p><p className="text-lg font-black text-red-800">{formatCurrency(totalPrice - financials.amountPaid)}</p></div>
+                                        <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-center"><p className="text-xs font-bold text-blue-600 uppercase">Scheduled</p><p className="text-lg font-black text-blue-800">{formatCurrency(financials.totalScheduled)}</p></div>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="font-bold text-gray-800 mb-2">Payment Schedule</h4>
+                                        <div className="max-h-48 overflow-y-auto space-y-2 mb-3">
+                                            {schedule.length === 0 && <p className="text-sm text-gray-400 italic">No installments added.</p>}
+                                            {schedule.map((item, idx) => (
+                                                <div key={item.id} className="flex gap-2 items-center p-2 border rounded-lg bg-gray-50">
+                                                    <span className="text-xs font-bold text-gray-400 w-6">#{idx+1}</span>
+                                                    <MoneyInput disabled={!canEdit} value={item.amount} onChange={(val) => handleUpdateInstallment(item.id, 'amount', val)} className="w-24 p-1 text-sm border rounded" />
+                                                    <input type="date" disabled={!canEdit} value={item.dueDate} onChange={(e) => handleUpdateInstallment(item.id, 'dueDate', e.target.value)} className="flex-1 p-1 text-sm border rounded" />
+                                                    <select disabled={!canEdit} value={item.status} onChange={(e) => handleUpdateInstallment(item.id, 'status', e.target.value)} className={`text-xs font-bold p-1 rounded ${item.status === 'Paid' ? 'text-green-600 bg-green-100' : 'text-yellow-600 bg-yellow-100'}`}>
+                                                        <option value="Pending">Pending</option>
+                                                        <option value="Paid">Paid</option>
+                                                    </select>
+                                                    {canEdit && <button onClick={() => handleRemoveInstallment(item.id)} className="text-red-400 hover:text-red-600 px-1">×</button>}
                                                 </div>
-                                                <p className="text-xs text-gray-500">Installment #{index + 1}</p>
-                                            </div>
-
-                                            <div className="flex items-center space-x-3 w-full md:w-auto">
-                                                {/* NEW: Reminder Toggle */}
-                                                <label className={`flex items-center space-x-2 cursor-pointer transition-opacity ${item.status === 'Paid' ? 'opacity-50' : 'hover:opacity-80'}`}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={item.reminderEnabled || false}
-                                                        onChange={() => handleUpdateInstallment(item.id, 'reminderEnabled', null)} 
-                                                        className="form-checkbox h-4 w-4 text-indigo-600 rounded"
-                                                        disabled={item.status === 'Paid'}
-                                                    />
-                                                    <span className="text-xs text-gray-700 font-medium">Set Reminder</span>
-                                                </label>
-                                                
-                                                <select
-                                                    value={item.status}
-                                                    onChange={(e) => handleUpdateInstallment(item.id, 'status', e.target.value)}
-                                                    className={`p-1 text-xs font-semibold rounded-full border shadow-sm transition-colors w-24 text-center ${item.status === 'Paid' ? 'bg-green-500 text-white' : 'bg-yellow-500 text-white'}`}
-                                                >
-                                                    <option value="Pending">Pending</option>
-                                                    <option value="Paid">Paid</option>
-                                                </select>
-                                                
-                                                <button 
-                                                    onClick={() => handleRemoveInstallment(item.id)}
-                                                    className="text-red-500 hover:text-red-700 transition p-1 flex-shrink-0"
-                                                    title="Remove installment"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                                </button>
-                                            </div>
+                                            ))}
                                         </div>
-                                    ))
-                                )}
-                            </div>
-
-                            {/* --- Add New Installment Form --- (COMPLETED) */}
-                            <div className="mt-4 p-3 border-t pt-3 flex gap-3 items-end">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">Amount ($)</label>
-                                    <input
-                                        type="number"
-                                        value={newInstallment.amount}
-                                        onChange={(e) => setNewInstallment({ ...newInstallment, amount: e.target.value })}
-                                        placeholder="20000"
-                                        min="1"
-                                        className="w-full p-2 border rounded-lg"
-                                    />
+                                        {canEdit && (
+                                            <div className="flex gap-2">
+                                                <MoneyInput placeholder="Amount" value={newInstallment.amount} onChange={(val) => setNewInstallment({...newInstallment, amount: val})} className="w-1/3 p-2 text-sm border rounded-lg" />
+                                                <input type="date" value={newInstallment.date} onChange={(e) => setNewInstallment({...newInstallment, date: e.target.value})} className="flex-1 p-2 text-sm border rounded-lg" />
+                                                <button onClick={handleAddInstallment} className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold hover:bg-indigo-200">Add</button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="flex-1">
-                                    <label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label>
-                                    <input
-                                        type="date"
-                                        value={newInstallment.date}
-                                        onChange={(e) => setNewInstallment({ ...newInstallment, date: e.target.value })}
-                                        className="w-full p-2 border rounded-lg"
-                                    />
-                                </div>
-                                <button
-                                    onClick={handleAddInstallment}
-                                    className="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition"
-                                >
-                                    Add
-                                </button>
-                            </div>
-                        </div>
+                            )}
+                        </>
                     )}
                 </div>
 
-                {/* --- Modal Actions --- */}
-                <div className="mt-8 pt-4 border-t flex justify-between items-center">
-                    <button
-                        onClick={closeModal}
-                        className="px-6 py-2 text-sm font-semibold text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition flex items-center"
-                    >
-                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                        Back
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="px-8 py-2 text-sm font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 transition disabled:bg-green-400"
-                    >
-                        {isSaving ? 'Saving...' : 'Save Changes'}
-                    </button>
+                <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end space-x-3">
+                    <button onClick={closeModal} className="px-6 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg transition">Close</button>
+                    {canEdit && !hideFinancials && <button onClick={handleSave} className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700 transition">Save Changes</button>}
+                    {/* For sales agents who can change status but not edit financials */}
+                    {canEdit && hideFinancials && false /* Placeholder if we wanted to allow Status Change only */}
                 </div>
             </div>
         </div>
     );
 };
 
-// --- Reminder Banner Component ---
-const ReminderBanner = ({ reminder }) => {
-    if (!reminder) return null;
 
-    const formattedDate = new Date(reminder.dueDate).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-    });
-    
-    // Choose color based on days remaining
-    let bgClass = 'bg-indigo-600';
-    let icon = `<svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
-
-    if (reminder.daysRemaining === 'OVERDUE' || reminder.daysRemaining < 0) {
-        bgClass = 'bg-red-600';
-        icon = `<svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`;
-    } else if (reminder.daysRemaining <= 7) {
-        bgClass = 'bg-yellow-600';
-        icon = `<svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v3m0 3h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`;
-    }
-
-
-    const daysText = reminder.daysRemaining === 'OVERDUE' 
-        ? 'OVERDUE!' 
-        : reminder.daysRemaining === 0 
-        ? 'DUE TODAY!'
-        : `in ${reminder.daysRemaining} days`;
-
-    return (
-        <div className={`p-3 rounded-xl mb-6 shadow-xl text-white font-semibold flex items-center justify-between ${bgClass}`}>
-            <div className="flex items-center">
-                <div dangerouslySetInnerHTML={{ __html: icon }} className="flex-shrink-0"></div>
-                <span className="text-lg">
-                    **Active Reminder:** Payment for **Unit {reminder.unitId}** ({reminder.floorName}) is **${reminder.amount.toLocaleString()}** due on {formattedDate}.
-                </span>
-            </div>
-            <span className="text-2xl font-extrabold px-4 py-1 rounded-full bg-white bg-opacity-20 flex-shrink-0">
-                {daysText}
-            </span>
-        </div>
-    );
-};
-
-// --- Notification Popover Component (NEW) ---
-const NotificationPopover = ({ reminders, onClose, onUnitSelect }) => {
-    return (
-        <div className="absolute right-0 top-12 mt-2 w-80 rounded-xl shadow-2xl bg-white ring-1 ring-black ring-opacity-5 z-50 transition-all transform origin-top-right">
-            <div className="p-4 border-b flex justify-between items-center">
-                <h3 className="text-lg font-bold text-indigo-700">Payment Reminders</h3>
-                <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-600">
-                    {reminders.length} Active
-                </span>
-            </div>
-            <div className="py-2 max-h-96 overflow-y-auto">
-                {reminders.length === 0 ? (
-                    <p className="text-gray-500 text-sm p-4 text-center">No active reminders.</p>
-                ) : (
-                    reminders.map((r, index) => (
-                        <div 
-                            key={index} 
-                            className="px-4 py-3 hover:bg-gray-50 border-b last:border-b-0 cursor-pointer" 
-                            onClick={() => {
-                                onClose();
-                                onUnitSelect(r.unitDocId); // Pass the full unit Doc ID
-                            }}
-                        >
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="font-semibold text-gray-800">Unit {r.unitId} - {r.floorName}</span>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${r.daysRemaining <= 7 ? 'bg-yellow-500 text-white' : 'bg-indigo-100 text-indigo-600'}`}>
-                                    {r.daysRemaining === 0 ? 'Due Today' : `${r.daysRemaining} days`}
-                                </span>
-                            </div>
-                            <p className="text-xs text-gray-600 mt-1">
-                                <span className="font-bold">${r.amount.toLocaleString()}</span> due on {new Date(r.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </p>
-                        </div>
-                    ))
-                )}
-            </div>
-            <div className="p-2 border-t text-center">
-                <button onClick={onClose} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-                    Close
-                </button>
-            </div>
-        </div>
-    );
-};
-
-// --- Editable Title Component ---
-const EditableTitle = ({ initialTitle, db, userId }) => {
-    const [isEditing, setIsEditing] = useState(false);
-    const [draftTitle, setDraftTitle] = useState(initialTitle);
-    const [saveError, setSaveError] = useState(null);
-    const [isSaving, setIsSaving] = useState(false);
-
-    // Update draft title if initialTitle changes from Firestore
-    useEffect(() => {
-        setDraftTitle(initialTitle);
-    }, [initialTitle]);
-
-    const handleSave = async () => {
-        const trimmedTitle = draftTitle.trim();
-        if (!db || !userId || trimmedTitle === initialTitle || trimmedTitle === '') {
-            setIsEditing(false);
-            setDraftTitle(initialTitle); // Revert if empty or unchanged
-            return;
-        }
-
-        setIsSaving(true);
-        setSaveError(null);
-        
-        try {
-            const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-            await updateDoc(settingsRef, {
-                appName: trimmedTitle,
-                lastUpdated: Timestamp.now(),
-                updatedBy: userId
-            });
-            setIsEditing(false);
-        } catch (e) {
-            console.error('Error updating app name:', e);
-            setSaveError('Failed to save name. Check the console for details.');
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    if (isEditing) {
-        return (
-            <div className="flex flex-col space-y-1">
-                <div className="flex items-center space-x-2">
-                    <input
-                        type="text"
-                        value={draftTitle}
-                        onChange={(e) => setDraftTitle(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-                        className="text-3xl font-extrabold text-indigo-800 p-2 border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full md:w-auto min-w-40"
-                        disabled={isSaving}
-                    />
-                    <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:bg-indigo-400"
-                        title="Save Name"
-                    >
-                        {isSaving ? (
-                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        ) : (
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                        )}
-                    </button>
-                    <button
-                        onClick={() => { setIsEditing(false); setDraftTitle(initialTitle); setSaveError(null); }}
-                        className="p-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
-                        disabled={isSaving}
-                        title="Cancel Edit"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-                {saveError && <p className="text-red-500 text-sm mt-1">{saveError}</p>}
-            </div>
-        );
-    }
-
-    return (
-        <h1 
-            className="text-3xl font-extrabold text-indigo-800 cursor-pointer hover:underline flex items-center group" 
-            onClick={() => setIsEditing(true)}
-            title="Click to edit application name"
-        >
-            {initialTitle}
-            <svg className="w-5 h-5 ml-2 text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-        </h1>
-    );
-};
-
-// --- Main Application Component ---
+// --- MAIN APP ---
 export default function App() {
-    // Firebase state
+    const [user, setUser] = useState(null);
+    const [role, setRole] = useState(null);
+    const [userProfile, setUserProfile] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [loginError, setLoginError] = useState(null);
+    
+    // UI State
+    const [view, setView] = useState('overview');
+    const [units, setUnits] = useState([]);
+    const [totalFloors, setTotalFloors] = useState(DEFAULT_INITIAL_FLOORS);
+    const [selectedUnit, setSelectedUnit] = useState(null);
+    const [showProfileModal, setShowProfileModal] = useState(false);
+
+    // Firebase
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
-    const [userId, setUserId] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(false);
 
-    // Data state
-    const [units, setUnits] = useState([]); // Flat array of all units
-    const [totalFloors, setTotalFloors] = useState(DEFAULT_INITIAL_FLOORS); // From settings
-    const [appName, setAppName] = useState('Real Estate Sales Tracker');
-    const [appLogoType, setAppLogoType] = useState('icon'); 
-    const [appLogoSource, setAppLogoSource] = useState('Building'); 
-    
-    // Reminder state
-    const [nextReminder, setNextReminder] = useState(null); // Used for the banner (earliest one)
-    const [allReminders, setAllReminders] = useState([]); // NEW: Used for the notification popover
-    
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-
-    // UI state
-    const [selectedUnit, setSelectedUnit] = useState(null);
-    const [showEditModal, setShowEditModal] = useState(false);
-    const [showManageModal, setShowManageModal] = useState(false);
-    const [showLogoModal, setShowLogoModal] = useState(false); 
-    const [showNotifications, setShowNotifications] = useState(false); // NEW: To toggle popover
-
-    // --- 1. Initialize Firebase and Auth ---
     useEffect(() => {
-        if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
-            setError("Firebase config is missing.");
-            setLoading(false);
-            return;
-        }
-
-        try {
-            const app = initializeApp(firebaseConfig);
-            const authInstance = getAuth(app);
-            const dbInstance = getFirestore(app);
-
-            // Enable debug logging for Firestore
-            setLogLevel('debug'); 
-
-            setDb(dbInstance);
-            setAuth(authInstance);
-
-            const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
-                if (user) {
-                    console.log("User is signed in with UID:", user.uid);
-                    setUserId(user.uid);
-                } else {
-                    console.log("No user signed in, attempting auth...");
-                    try {
-                        if (initialAuthToken) {
-                            console.log("Signing in with custom token...");
-                            await signInWithCustomToken(authInstance, initialAuthToken);
-                        } else {
-                            console.log("Signing in anonymously...");
-                            await signInAnonymously(authInstance);
-                        }
-                    } catch (authError) {
-                        console.error("Authentication error:", authError);
-                        setError(authError.message);
-                    }
-                }
-                setIsAuthReady(true);
-            });
-
-            return () => unsubscribe();
-
-        } catch (e) {
-            console.error("Error initializing Firebase:", e);
-            setError(e.message);
-            setLoading(false);
-        }
+        const init = async () => {
+            try {
+                const app = initializeApp(FIREBASE_CONFIG);
+                const _auth = getAuth(app);
+                const _db = initializeFirestore(app, { experimentalForceLongPolling: true });
+                setLogLevel('silent');
+                setAuth(_auth);
+                setDb(_db);
+                onAuthStateChanged(_auth, (u) => {
+                    setUser(u);
+                    if(!u) setRole(null);
+                    setLoading(false);
+                });
+            } catch (e) { setLoading(false); }
+        };
+        init();
     }, []);
 
-    // --- 2. Firestore Listeners ---
     useEffect(() => {
-        if (!isAuthReady || !db || !userId) {
-            // Wait for auth to be ready
-            return;
-        }
+        if (!user || !db) return;
 
-        setLoading(true);
-        console.log("Auth ready, setting up Firestore listeners...");
+        // Settings Listener
+        const unsubSettings = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'settings', 'global'), (snap) => {
+            if (snap.exists()) setTotalFloors(snap.data().totalFloors || DEFAULT_INITIAL_FLOORS);
+            else setDoc(snap.ref, { totalFloors: DEFAULT_INITIAL_FLOORS, createdAt: Timestamp.now() });
+        });
 
-        // --- Listener for Global Settings (like totalFloors and appName/logo) ---
-        const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-        const settingsUnsubscribe = onSnapshot(settingsRef, (doc) => {
-            if (doc.exists()) {
-                const data = doc.data();
-                console.log("Global settings loaded:", data);
-                setTotalFloors(data.totalFloors || DEFAULT_INITIAL_FLOORS);
-                setAppName(data.appName || 'Real Estate Sales Tracker');
-                setAppLogoType(data.appLogoType || 'icon'); 
-                setAppLogoSource(data.appLogoSource || 'Building'); 
+        // Units Listener
+        const unsubUnits = onSnapshot(collection(db, 'artifacts', APP_ID, 'public', 'data', 'units'), (snap) => {
+            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            if (data.length === 0 && role === ROLES.ADMIN) {
+                const batch = writeBatch(db);
+                for(let f=1; f<=DEFAULT_INITIAL_FLOORS; f++) {
+                    DEFAULT_UNIT_TYPES.forEach(uid => {
+                        const u = createUnitData(f, uid);
+                        batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', u.id), u);
+                    });
+                }
+                batch.commit();
             } else {
-                // First time run! Initialize the building.
-                console.log("No global settings found. Initializing building...");
-                initializeBuilding(db, userId);
+                setUnits(data);
             }
-        }, (err) => {
-            console.error("Error listening to settings:", err);
-            setError(err.message);
         });
-
-        // --- Listener for all Units ---
-        const unitsRef = collection(db, 'artifacts', appId, 'public', 'data', 'units');
         
-        // MODIFICATION: Removed orderBy clauses to prevent index error.
-        const q = query(unitsRef);
-
-        const unitsUnsubscribe = onSnapshot(q, (snapshot) => {
-            let unitsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-            // MODIFICATION: Sort the data in JavaScript instead of in the query
-            unitsData.sort((a, b) => {
-                if (a.floor !== b.floor) {
-                    return a.floor - b.floor; // Sort by floor number
-                }
-                return a.unitId.localeCompare(b.unitId); // Then sort by unitId
-            });
-            
-            console.log(`Units listener updated. Loaded ${unitsData.length} units.`);
-            setUnits(unitsData);
-            setLoading(false);
-        }, (err) => {
-            console.error("Error listening to units:", err);
-            setError(err.message);
-            setLoading(false);
+        // Profile Listener
+        const unsubProfile = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', user.uid), (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                setUserProfile(data);
+                // If not strictly the hardcoded admin, trust the DB role (unless simulated)
+                if (user.uid !== 'hardcoded-admin-uid') setRole(data.role || ROLES.SALES);
+            }
         });
 
-        return () => {
-            console.log("Cleaning up listeners...");
-            settingsUnsubscribe();
-            unitsUnsubscribe();
-        };
+        return () => { unsubSettings(); unsubUnits(); unsubProfile(); };
+    }, [user, db, role]);
 
-    }, [isAuthReady, db, auth, userId]); // Re-run when auth is ready
-
-    // --- 3. First-Time Building Initialization Function ---
-    const initializeBuilding = async (db, currentUserId) => {
+    const handleLogin = async (email, password, demoRole) => {
         setLoading(true);
-        setError(null);
-        console.log(`Starting initial build for ${DEFAULT_INITIAL_FLOORS} floors...`);
+        setLoginError(null);
         try {
-            const batch = writeBatch(db);
+            let targetRole = ROLES.SALES;
+            let targetProfile = {};
+            let isHardcodedAdmin = false;
 
-            // 1. Create the global settings doc
-            const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-            batch.set(settingsRef, {
-                totalFloors: DEFAULT_INITIAL_FLOORS,
-                appName: 'Real Estate Sales Tracker',
-                appLogoType: 'icon', 
-                appLogoSource: 'Building', 
-                createdAt: Timestamp.now(),
-                updatedBy: currentUserId
-            });
-
-            // 2. Create units for all floors
-            const unitsRef = collection(db, 'artifacts', appId, 'public', 'data', 'units');
-            for (let floor = 1; floor <= DEFAULT_INITIAL_FLOORS; floor++) {
-                for (const unitId of DEFAULT_UNIT_TYPES) {
-                    const unitData = createUnitData(floor, unitId);
-                    const unitDocRef = doc(unitsRef, unitData.id);
-                    batch.set(unitDocRef, unitData);
-                }
+            // 1. Check Hardcoded Admin
+            if (email === 'maedotmetsihet0@gmail.com' && password === 'M@ed0t2090') {
+                targetRole = ROLES.ADMIN;
+                isHardcodedAdmin = true;
+                targetProfile = { fName: 'Maedot', lName: 'Admin', role: ROLES.ADMIN };
+            } 
+            // 2. Check Database for Simulated Users (if not hardcoded)
+            else if (email && password && db) {
+                 const q = query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'users'), where('email', '==', email), where('password', '==', password));
+                 const snap = await getDocs(q);
+                 if (snap.empty) throw new Error("Invalid email or password.");
+                 const userData = snap.docs[0].data();
+                 targetRole = userData.role;
+                 targetProfile = userData;
+            }
+            // 3. Demo Role Fallback
+            else if (demoRole) {
+                targetRole = demoRole;
+                targetProfile = { fName: 'Demo', lName: demoRole, role: demoRole };
+            } 
+            else {
+                throw new Error("Please enter credentials.");
             }
             
-            await batch.commit();
-            console.log("Initial building created successfully.");
+            // Perform Auth
+            if (!user) {
+                if (INITIAL_AUTH_TOKEN) await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
+                else await signInAnonymously(auth);
+            }
+
+            // Set State
+            setRole(targetRole);
+            setUserProfile(targetProfile);
+            
+            // Sync current profile to DB if it's the hardcoded admin (to allow editing)
+            if (isHardcodedAdmin && auth.currentUser) {
+                 const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', auth.currentUser.uid);
+                 await setDoc(ref, { ...targetProfile, id: auth.currentUser.uid }, { merge: true });
+            }
+
         } catch (e) {
-            console.error("Error initializing building:", e);
-            setError(`Failed to initialize building: ${e.message}`);
+            console.error(e);
+            setLoginError(e.message);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
+    const handleUpdateProfile = async (newData) => {
+        if (!user || !db) return;
+        await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', user.uid), newData, { merge: true });
+        setShowProfileModal(false);
+    };
 
-    // --- 4. Memoized Data Transformations & Reminders Update ---
-
-    // Group the flat 'units' array into an object keyed by 'floorName'
-    const floors = useMemo(() => {
-        console.log("Memo: Grouping units by floor...");
-        const grouped = units.reduce((acc, unit) => {
-            const floorName = unit.floorName;
-            if (!acc[floorName]) {
-                acc[floorName] = [];
-            }
-            acc[floorName].push(unit);
-            return acc;
-        }, {});
-        
-        // Ensure floors are sorted numerically, not alphabetically
-        const sortedKeys = Object.keys(grouped).sort((a, b) => {
-            // Extracts the number from the floor name string (e.g., '1st Floor' -> 1)
-            const floorA = parseInt(a);
-            const floorB = parseInt(b);
-            return floorA - floorB;
-        });
-        
-        const sortedGrouped = {};
-        for(const key of sortedKeys){
-            sortedGrouped[key] = grouped[key];
-        }
-        return sortedGrouped;
-
-    }, [units]);
-    
-    // Calculate dashboard stats
     const stats = useMemo(() => {
-        console.log("Memo: Calculating stats...");
-        const totalUnits = units.length;
-        let unitsAvailable = 0;
-        let unitsHeld = 0;
-        let unitsSold = 0;
-        let totalSalesValue = 0;
-        let totalCollected = 0;
-
-        for (const unit of units) {
-            if (unit.status === 'Available') {
-                unitsAvailable++;
-            } else if (unit.status === 'Held') {
-                unitsHeld++;
-            } else if (unit.status === 'Sold') {
-                unitsSold++;
+        const s = { totalUnits: units.length, unitsAvailable: 0, unitsHeld: 0, unitsSold: 0, totalSalesValue: 0, totalCollected: 0 };
+        units.forEach(u => {
+            if (u.status === 'Available') s.unitsAvailable++;
+            if (u.status === 'Held') s.unitsHeld++;
+            if (u.status === 'Sold') s.unitsSold++;
+            if (u.status !== 'Available') {
+                s.totalSalesValue += (u.totalPrice || 0);
+                s.totalCollected += (u.amountPaid || 0);
             }
-
-            if (unit.status === 'Held' || unit.status === 'Sold') {
-                totalSalesValue += unit.totalPrice || 0;
-                totalCollected += unit.amountPaid || 0;
-            }
-        }
-
-        return {
-            totalUnits,
-            unitsAvailable,
-            unitsHeld,
-            unitsSold,
-            totalSalesValue,
-            totalCollected,
-        };
+        });
+        return s;
     }, [units]);
 
-    // Update reminders whenever units change
-    useEffect(() => {
-        if (units.length > 0) {
-            const reminders = findAllActiveReminders(units);
-            setAllReminders(reminders);
-            
-            // Keep nextReminder for the banner (earliest one)
-            setNextReminder(reminders.length > 0 ? reminders[0] : null);
-        } else {
-             setAllReminders([]);
-             setNextReminder(null);
-        }
+    const notifications = useMemo(() => {
+        return units.filter(u => u.status === 'Sold').slice(0, 3).map(u => ({
+            title: `Payment Reminder: Unit ${u.unitId}`,
+            msg: `Scheduled payment pending for ${u.clientName || 'Client'}.`
+        }));
     }, [units]);
 
-
-    // --- 5. UI Event Handlers ---
-    const handleUnitClick = (unit) => {
-        setSelectedUnit(unit);
-        setShowEditModal(true);
-    };
-    
-    // Handler for clicking a reminder in the popover
-    const handleNotificationClick = (unitDocId) => {
-        // Find the full unit object from the flat 'units' array using the Firestore Document ID
-        const unit = units.find(u => u.id === unitDocId);
-        if (unit) {
-            setSelectedUnit(unit);
-            setShowEditModal(true);
-        } else {
-            console.error("Unit not found for ID:", unitDocId);
-        }
-    };
-
-    const handleCloseModal = () => {
-        setShowEditModal(false);
-        setSelectedUnit(null);
-    };
-    
-    const handleShowManageModal = () => {
-        setShowManageModal(true);
-    };
-
-    const handleShowLogoModal = () => {
-        setShowLogoModal(true);
-    };
-    
-    const handleCloseLogoModal = () => {
-        setShowLogoModal(false);
-    };
-
-    // --- 6. Helper Functions for Rendering ---
-    const getUnitStatusColor = (status) => {
-        switch (status) {
-            case 'Available':
-                return 'bg-green-100 border-green-500 text-green-700';
-            case 'Held':
-                return 'bg-yellow-100 border-yellow-500 text-yellow-700';
-            case 'Sold':
-                return 'bg-red-100 border-red-500 text-red-700';
-            default:
-                return 'bg-gray-100 border-gray-400 text-gray-700';
-        }
-    };
-    
-    // --- 7. Main Render ---
-    if (loading && units.length === 0) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-100">
-                <div className="text-xl font-semibold text-gray-700">Loading Building Data...</div>
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-100">
-                <div className="p-6 bg-red-100 border border-red-400 rounded-lg">
-                    <h3 className="text-xl font-bold text-red-700">An Error Occurred</h3>
-                    <p className="text-red-600 mt-2">{error}</p>
-                    <p className="text-sm text-gray-600 mt-4">Please check the console and refresh the page.</p>
-                </div>
-            </div>
-        );
-    }
+    if (!role) return <LoginScreen onLogin={handleLogin} loading={loading} error={loginError} />;
 
     return (
-        <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-inter">
-            {/* --- Modals --- */}
-            {showEditModal && selectedUnit && (
-                <EditModal
-                    unit={selectedUnit}
-                    closeModal={handleCloseModal}
-                    db={db}
-                    userId={userId}
+        <div className="font-inter bg-gray-50 min-h-screen text-gray-900">
+            <Sidebar currentView={view} setView={setView} role={role} onLogout={() => { signOut(auth); setRole(null); setView('overview'); }} />
+            <Header role={role} notifications={notifications} userProfile={userProfile} onOpenProfile={() => setShowProfileModal(true)} />
+
+            <main className="pl-64 transition-all duration-300">
+                {view === 'overview' && <OverviewView stats={stats} role={role} />}
+                {view === 'building' && <BuildingView units={units} onUnitClick={setSelectedUnit} />}
+                {view === 'config' && <ConfigurationView totalFloors={totalFloors} setTotalFloors={setTotalFloors} db={db} userId={user.uid} units={units} />}
+                {view === 'users' && <UserManagementView db={db} />}
+            </main>
+
+            {selectedUnit && (
+                <EditModal 
+                    unit={selectedUnit} 
+                    closeModal={() => setSelectedUnit(null)} 
+                    db={db} 
+                    role={role}
+                    userId={user.uid}
                 />
             )}
             
-            {showManageModal && (
-                <FloorAndUnitManagerModal
-                    closeModal={() => setShowManageModal(false)}
-                    db={db}
-                    totalFloors={totalFloors}
-                    setTotalFloors={setTotalFloors} // Note: this is for local state, listener will confirm
-                    floors={floors}
-                    userId={userId}
+            {showProfileModal && (
+                <ProfileModal 
+                    userProfile={userProfile} 
+                    onClose={() => setShowProfileModal(false)} 
+                    onSave={handleUpdateProfile} 
                 />
             )}
-            
-            {showLogoModal && (
-                <LogoEditModal
-                    closeModal={handleCloseLogoModal}
-                    db={db}
-                    userId={userId}
-                    currentLogoType={appLogoType}
-                    currentLogoSource={appLogoSource}
-                />
-            )}
-
-            {/* --- Header --- */}
-            <header className="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
-                <div className="flex flex-col md:flex-row justify-between md:items-start">
-                    
-                    {/* Logo and Editable Title Group (Left) */}
-                    <div className="flex items-start space-x-4 mb-4 md:mb-0">
-                        {/* Logo Area */}
-                        <div 
-                            className="p-3 bg-indigo-500 rounded-xl text-white cursor-pointer hover:bg-indigo-600 transition shadow-lg flex-shrink-0"
-                            onClick={handleShowLogoModal}
-                            title="Click to change application logo"
-                        >
-                            <LogoDisplay 
-                                logoType={appLogoType} 
-                                logoSource={appLogoSource} 
-                                size={30} 
-                                className="text-white" 
-                            />
-                        </div>
-                        
-                        {/* Title and Info */}
-                        <div>
-                            <EditableTitle initialTitle={appName} db={db} userId={userId} />
-                            <p className="text-sm text-gray-500 mt-1">App ID: {appId}</p>
-                            <p className="text-sm text-gray-500">User ID: {userId}</p>
-                        </div>
-                    </div>
-                    
-                    {/* Actions and Notifications (Right) */}
-                    <div className="flex items-center space-x-4">
-                        {/* Notification Bell (NEW) */}
-                        <div className="relative">
-                            <button 
-                                onClick={() => setShowNotifications(!showNotifications)}
-                                className="p-3 bg-gray-100 rounded-full hover:bg-gray-200 transition relative"
-                                title="View Payment Reminders"
-                            >
-                                <div dangerouslySetInnerHTML={{ __html: ICON_SVGS.Bell }} className="w-6 h-6 text-gray-700" />
-                                {allReminders.length > 0 && (
-                                    <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">
-                                        {allReminders.length}
-                                    </span>
-                                )}
-                            </button>
-                            {showNotifications && (
-                                <NotificationPopover 
-                                    reminders={allReminders} 
-                                    onClose={() => setShowNotifications(false)} 
-                                    onUnitSelect={handleNotificationClick} 
-                                />
-                            )}
-                        </div>
-                        {/* Manage Button */}
-                        <button
-                            onClick={handleShowManageModal}
-                            className="px-5 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition flex-shrink-0"
-                        >
-                            Manage Building Structure
-                        </button>
-                    </div>
-                </div>
-            </header>
-            
-            {/* --- REMINDER BANNER (Shows the earliest reminder) --- */}
-            <ReminderBanner reminder={nextReminder} />
-
-            {/* --- Stats Dashboard --- */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-                <StatCard title="Total Sales Value" value={`$${stats.totalSalesValue.toLocaleString()}`} color="indigo" />
-                <StatCard title="Total Collected" value={`$${stats.totalCollected.toLocaleString()}`} color="green" />
-                <StatCard title="Available" value={stats.unitsAvailable} color="green" />
-                <StatCard title="Held" value={stats.unitsHeld} color="yellow" />
-                <StatCard title="Sold" value={stats.unitsSold} color="red" />
-            </div>
-
-            {/* --- Main Building View --- */}
-            <div className="space-y-6">
-                {Object.keys(floors).length === 0 && !loading && (
-                    <div className="p-6 bg-white rounded-lg shadow text-center text-gray-500">
-                        No units found for this building. Try the 'Manage Building Structure' button to add floors.
-                    </div>
-                )}
-
-                {Object.keys(floors).map(floorName => (
-                    <div key={floorName} className="bg-white p-4 rounded-xl shadow-md border border-gray-200">
-                        <h2 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">{floorName}</h2>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-                            {floors[floorName].map(unit => (
-                                <UnitCard
-                                    key={unit.id}
-                                    unit={unit}
-                                    onClick={handleUnitClick}
-                                    getColor={getUnitStatusColor}
-                                />
-                            ))}
-                        </div>
-                    </div>
-                ))}
-            </div>
         </div>
     );
 }
-
-// --- Sub-Components ---
-
-const StatCard = ({ title, value, color }) => {
-    const colors = {
-        indigo: 'bg-indigo-600',
-        green: 'bg-green-600',
-        yellow: 'bg-yellow-500',
-        red: 'bg-red-600',
-    };
-    return (
-        <div className={`p-4 rounded-xl shadow-lg text-white ${colors[color] || 'bg-gray-600'}`}>
-            <div className="text-sm font-medium uppercase opacity-80">{title}</div>
-            <div className="text-3xl font-extrabold">{value}</div>
-        </div>
-    );
-};
-
-const UnitCard = ({ unit, onClick, getColor }) => {
-    const colorClasses = getColor(unit.status);
-    
-    return (
-        <button
-            onClick={() => onClick(unit)}
-            className={`p-3 rounded-lg border-2 shadow-sm transition-all duration-200 hover:shadow-md hover:scale-105 ${colorClasses} text-left`}
-        >
-            <div className="flex justify-between items-center">
-                <span className="text-lg font-extrabold">{unit.unitId}</span>
-                <span className="text-xs font-semibold opacity-80">{unit.beds} Beds</span>
-            </div>
-            <div className="mt-2 text-xs font-semibold uppercase">{unit.status}</div>
-            <div className="text-xs truncate opacity-70 mt-1 h-4">
-                {unit.clientName || `${unit.areaSqm} sqm @ $${unit.pricePerSqm.toLocaleString()}/sqm`}
-            </div>
-        </button>
-    );
-};
