@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from 'firebase/auth';
-import { 
+import {
     getFirestore,
     initializeFirestore,
-    collection, 
-    doc, 
-    setDoc, 
-    onSnapshot, 
-    query, 
-    writeBatch, 
-    updateDoc, 
+    collection,
+    doc,
+    setDoc,
+    onSnapshot,
+    query,
+    writeBatch,
+    updateDoc,
     deleteDoc,
     where,
     getDocs,
@@ -27,7 +27,7 @@ try {
     FIREBASE_CONFIG = {
         apiKey: "AIzaSyDwILENUzfSYnZxCPmcEpWNB1gjap6VkOs",
         authDomain: "realestatedash-88e32.firebaseapp.com",
-        projectId: "realestatedash-88e32", 
+        projectId: "realestatedash-88e32",
         storageBucket: "realestatedash-88e32.firebasestorage.app",
         messagingSenderId: "831420404746",
         appId: "1:831420404746:web:9423470fcf9c8ffd497bf3",
@@ -41,7 +41,7 @@ try {
     console.error("Error parsing firebase config", e);
 }
 // Set to null locally. The app will use signInAnonymously().
-const INITIAL_AUTH_TOKEN = null; 
+const INITIAL_AUTH_TOKEN = null;
 
 const DEFAULT_UNIT_TYPES = ['A', 'B', 'C'];
 const DEFAULT_INITIAL_FLOORS = 17;
@@ -58,7 +58,7 @@ const PERMISSIONS = {
     [ROLES.ADMIN]: { canEdit: true, canManageUsers: true, canManageBuilding: true, viewFinancials: true, canConfig: true },
     [ROLES.OWNER]: { canEdit: true, canManageUsers: false, canManageBuilding: true, viewFinancials: true, canConfig: true },
     [ROLES.ACCOUNTANT]: { canEdit: false, canManageUsers: false, canManageBuilding: false, viewFinancials: true, canConfig: false },
-    [ROLES.SALES]: { canEdit: false, canManageUsers: false, canManageBuilding: false, viewFinancials: false, canConfig: false }, 
+    [ROLES.SALES]: { canEdit: false, canManageUsers: false, canManageBuilding: false, viewFinancials: false, canConfig: false },
 };
 
 // --- ICONS (Inline SVGs) ---
@@ -69,7 +69,10 @@ const Icons = {
     Users: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
     Bell: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>,
     Logout: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>,
-    Profile: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+    Profile: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+    Menu: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>,
+    Close: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>,
+    Sort: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
 };
 
 // --- DATA HELPERS ---
@@ -87,6 +90,7 @@ const createUnitData = (floor, unitId, customArea = 100, customPrice = 2000) => 
         pricePerSqm: Number(customPrice),
         status: 'Available',
         clientName: '',
+        clientPhone: '',
         totalPrice: Number(customArea) * Number(customPrice),
         amountPaid: 0,
         nextPaymentDate: null,
@@ -164,8 +168,8 @@ const MoneyInput = ({ value, onChange, disabled, className, placeholder }) => {
     const handleChange = (e) => {
         const rawInput = e.target.value.replace(/,/g, '');
         if (rawInput === '' || /^\d+$/.test(rawInput)) {
-            setDisplayVal(e.target.value); // Temporarily show what user typed
-            onChange(rawInput); // Pass pure number to parent
+            setDisplayVal(e.target.value); 
+            onChange(rawInput);
         }
     };
 
@@ -187,13 +191,12 @@ const MoneyInput = ({ value, onChange, disabled, className, placeholder }) => {
 };
 
 
-// --- COMPONENTS ---
+// --- VIEWS ---
 
 // 1. Login Screen
 const LoginScreen = ({ onLogin, loading, error }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [demoRole, setDemoRole] = useState(null);
 
     const handleLogin = (e) => {
         e.preventDefault();
@@ -202,10 +205,10 @@ const LoginScreen = ({ onLogin, loading, error }) => {
 
     return (
         <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-inter">
-            <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl">
+            <div className="bg-white w-full max-w-md p-6 md:p-8 rounded-2xl shadow-xl">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-extrabold text-indigo-800">Mad<span className="text-indigo-500">Tracking</span></h1>
-                    <p className="text-gray-500 mt-2">Secure Real Estate Management</p>
+                    <h1 className="text-2xl md:text-3xl font-extrabold text-indigo-800">Skyline<span className="text-indigo-500">Tracker</span></h1>
+                    <p className="text-gray-500 mt-2 text-sm">Secure Real Estate Management</p>
                 </div>
 
                 {error && (
@@ -214,7 +217,7 @@ const LoginScreen = ({ onLogin, loading, error }) => {
                     </div>
                 )}
 
-                <form onSubmit={handleLogin} className="space-y-6">
+                <form onSubmit={handleLogin} className="space-y-4 md:space-y-6">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
                         <input 
@@ -246,15 +249,15 @@ const LoginScreen = ({ onLogin, loading, error }) => {
                         {loading ? 'Verifying...' : 'Sign In'}
                     </button>
                     
-                    <div className="pt-6 border-t border-gray-100 mt-6">
-                         <p className="text-xs text-center text-gray-400 mb-3 uppercase tracking-wide">Quick Demo Access (Simulation)</p>
+                    <div className="pt-4 border-t border-gray-100 mt-4">
+                         <p className="text-[10px] text-center text-gray-400 mb-2 uppercase tracking-wide">Quick Demo Access</p>
                          <div className="grid grid-cols-3 gap-2">
                              {[ROLES.OWNER, ROLES.ACCOUNTANT, ROLES.SALES].map(role => (
                                  <button
                                      key={role}
                                      type="button"
                                      onClick={() => onLogin(null, null, role)}
-                                     className="px-2 py-2 text-xs font-semibold rounded border bg-gray-50 hover:bg-gray-100 text-gray-600 truncate"
+                                     className="px-1 py-2 text-[10px] font-semibold rounded border bg-gray-50 hover:bg-gray-100 text-gray-600 truncate"
                                  >
                                      {role}
                                  </button>
@@ -268,55 +271,79 @@ const LoginScreen = ({ onLogin, loading, error }) => {
 };
 
 // 2. Sidebar
-const Sidebar = ({ currentView, setView, role, onLogout }) => {
+const Sidebar = ({ currentView, setView, role, onLogout, isOpen, setIsOpen }) => {
     const permissions = PERMISSIONS[role] || {};
 
     const menuItems = [
         { id: 'overview', label: 'Overview', icon: Icons.Dashboard, visible: true },
         { id: 'building', label: 'Building & Units', icon: Icons.Building, visible: true },
-        { id: 'config', label: 'Configuration', icon: Icons.Config, visible: permissions.canConfig }, // Merged Settings
+        { id: 'config', label: 'Configuration', icon: Icons.Config, visible: permissions.canConfig },
         { id: 'users', label: 'User Mgmt', icon: Icons.Users, visible: permissions.canManageUsers },
     ];
 
-    return (
-        <div className="w-64 bg-white border-r border-gray-200 h-screen fixed left-0 top-0 flex flex-col z-20">
-            <div className="p-6 border-b border-gray-100">
-                <h2 className="text-2xl font-black text-indigo-800 tracking-tight">Mad<span className="text-indigo-500">Tracking</span></h2>
-                <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">{role}</p>
-            </div>
-            
-            <nav className="flex-1 p-4 space-y-1">
-                {menuItems.filter(item => item.visible).map(item => (
-                    <button
-                        key={item.id}
-                        onClick={() => setView(item.id)}
-                        className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 font-medium ${
-                            currentView === item.id 
-                                ? 'bg-indigo-50 text-indigo-700 shadow-sm' 
-                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
-                        }`}
-                    >
-                        <item.icon />
-                        <span>{item.label}</span>
-                    </button>
-                ))}
-            </nav>
+    const handleNav = (id) => {
+        setView(id);
+        setIsOpen(false);
+    };
 
-            <div className="p-4 border-t border-gray-100">
-                <button 
-                    onClick={onLogout}
-                    className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-xl transition"
-                >
-                    <Icons.Logout />
-                    <span>Sign Out</span>
-                </button>
+    return (
+        <>
+            {/* Overlay for mobile */}
+            {isOpen && (
+                <div 
+                    className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-30 lg:hidden"
+                    onClick={() => setIsOpen(false)}
+                />
+            )}
+
+            <div className={`
+                w-64 bg-white border-r border-gray-200 h-screen fixed left-0 top-0 flex flex-col z-40
+                transition-transform duration-300 transform lg:translate-x-0
+                ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+            `}>
+                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                    <div>
+                        <h2 className="text-2xl font-black text-indigo-800 tracking-tight">Skyline<span className="text-indigo-500">Tracker</span></h2>
+                        <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest font-semibold">{role}</p>
+                    </div>
+                    <button onClick={() => setIsOpen(false)} className="lg:hidden p-2 text-gray-400">
+                        <Icons.Close />
+                    </button>
+                </div>
+                
+                <nav className="flex-1 p-4 space-y-1">
+                    {menuItems.filter(item => item.visible).map(item => (
+                        <button
+                            key={item.id}
+                            onClick={() => handleNav(item.id)}
+                            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 font-medium ${
+                                currentView === item.id 
+                                    ? 'bg-indigo-50 text-indigo-700 shadow-sm' 
+                                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                        >
+                            <item.icon />
+                            <span>{item.label}</span>
+                        </button>
+                    ))}
+                </nav>
+
+                <div className="p-4 border-t border-gray-100">
+                    <button 
+                        onClick={onLogout}
+                        className="w-full flex items-center space-x-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-xl transition"
+                    >
+                        <Icons.Logout />
+                        <span>Sign Out</span>
+                    </button>
+                </div>
             </div>
-        </div>
+        </>
     );
 };
 
 // 3. Header
-const Header = ({ role, notifications = [], userProfile, onOpenProfile }) => {
+const Header = ({ role, notifications = [], userProfile, onOpenProfile, onMenuClick, onNotifClick }) => {
     const [showNotifs, setShowNotifs] = useState(false);
     const notifRef = useRef(null);
 
@@ -329,38 +356,52 @@ const Header = ({ role, notifications = [], userProfile, onOpenProfile }) => {
     }, []);
 
     return (
-        <header className="h-16 bg-white border-b border-gray-200 fixed top-0 right-0 left-64 z-10 flex justify-between items-center px-8 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-700">Dashboard</h2>
+        <header className="h-16 bg-white border-b border-gray-200 fixed top-0 right-0 left-0 lg:left-64 z-20 flex justify-between items-center px-4 md:px-8 shadow-sm">
+            <div className="flex items-center gap-4">
+                <button 
+                    onClick={onMenuClick}
+                    className="p-2 text-gray-500 lg:hidden hover:bg-gray-100 rounded-lg transition"
+                >
+                    <Icons.Menu />
+                </button>
+                <h2 className="text-sm md:text-lg font-semibold text-gray-700 truncate max-w-[150px] md:max-w-none">
+                    Dashboard
+                </h2>
+            </div>
             
-            <div className="flex items-center space-x-6">
-                {/* Notifications */}
+            <div className="flex items-center space-x-3 md:space-x-6">
                 <div className="relative" ref={notifRef}>
                     <button 
                         onClick={() => setShowNotifs(!showNotifs)}
-                        className="relative text-gray-400 hover:text-indigo-600 transition"
+                        className="relative text-gray-400 hover:text-indigo-600 transition p-2"
                     >
                         <Icons.Bell />
                         {notifications.length > 0 && (
-                            <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-xs text-white flex items-center justify-center border border-white">
+                            <span className="absolute top-1 right-1 h-4 w-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center border border-white">
                                 {notifications.length}
                             </span>
                         )}
                     </button>
 
                     {showNotifs && (
-                        <div className="absolute right-0 mt-3 w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden ring-1 ring-black ring-opacity-5">
-                            <div className="p-3 bg-gray-50 border-b border-gray-100 font-semibold text-sm text-gray-700">
+                        <div className="absolute right-0 mt-3 w-72 md:w-80 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden ring-1 ring-black ring-opacity-5">
+                            <div className="p-3 bg-gray-50 border-b border-gray-100 font-semibold text-xs text-gray-700">
                                 Notifications ({notifications.length})
                             </div>
                             <div className="max-h-64 overflow-y-auto">
                                 {notifications.length === 0 ? (
-                                    <div className="p-4 text-sm text-gray-500 text-center">No pending reminders.</div>
+                                    <div className="p-4 text-xs text-gray-500 text-center">No pending reminders.</div>
                                 ) : (
                                     notifications.map((n, i) => (
-                                        <div key={i} className="p-3 border-b border-gray-50 hover:bg-gray-50 transition">
-                                            <p className="text-sm font-medium text-gray-800">{n.title}</p>
-                                            <p className="text-xs text-gray-500">{n.msg}</p>
-                                        </div>
+                                        <button 
+                                            key={i} 
+                                            onClick={() => { onNotifClick(n.unitId); setShowNotifs(false); }}
+                                            className="w-full text-left p-3 border-b border-gray-50 hover:bg-indigo-50 transition cursor-pointer"
+                                        >
+                                            <p className="text-xs font-bold text-gray-800">{n.title}</p>
+                                            <p className="text-[10px] text-gray-500">{n.msg}</p>
+                                            {n.phone && <p className="text-[9px] text-indigo-500 mt-1 font-semibold">📞 {n.phone}</p>}
+                                        </button>
                                     ))
                                 )}
                             </div>
@@ -368,17 +409,16 @@ const Header = ({ role, notifications = [], userProfile, onOpenProfile }) => {
                     )}
                 </div>
 
-                {/* Profile */}
                 <button 
                     onClick={onOpenProfile}
-                    className="flex items-center space-x-3 border-l pl-6 border-gray-200 hover:opacity-80 transition"
+                    className="flex items-center space-x-2 md:space-x-3 border-l pl-3 md:pl-6 border-gray-200 hover:opacity-80 transition"
                 >
-                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm">
+                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs">
                         {userProfile?.fName?.[0] || role[0]}
                     </div>
-                    <div className="hidden md:block text-left">
-                        <p className="text-sm font-medium text-gray-800">{userProfile?.fName || 'User'}</p>
-                        <p className="text-xs text-gray-500">{role}</p>
+                    <div className="hidden sm:block text-left">
+                        <p className="text-xs font-medium text-gray-800">{userProfile?.fName || 'User'}</p>
+                        <p className="text-[10px] text-gray-500">{role}</p>
                     </div>
                 </button>
             </div>
@@ -389,39 +429,37 @@ const Header = ({ role, notifications = [], userProfile, onOpenProfile }) => {
 // --- VIEWS ---
 
 const OverviewView = ({ stats, role }) => {
-    // Sales role: Read-only access to unit availability (financial totals are hidden).
     const showFinancials = PERMISSIONS[role]?.viewFinancials && role !== ROLES.SALES;
 
     return (
-        <div className="p-8 pt-24 min-h-screen bg-gray-50 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 font-medium">Total Units</p>
-                    <p className="text-3xl font-bold text-gray-800 mt-2">{stats.totalUnits}</p>
+        <div className="p-4 md:p-8 pt-20 md:pt-24 min-h-screen bg-gray-50 space-y-4 md:space-y-8">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <p className="text-xs md:text-sm text-gray-500 font-medium">Total Units</p>
+                    <p className="text-xl md:text-3xl font-bold text-gray-800 mt-1 md:mt-2">{stats.totalUnits}</p>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 font-medium">Available</p>
-                    <p className="text-3xl font-bold text-green-600 mt-2">{stats.unitsAvailable}</p>
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <p className="text-xs md:text-sm text-gray-500 font-medium">Available</p>
+                    <p className="text-xl md:text-3xl font-bold text-green-600 mt-1 md:mt-2">{stats.unitsAvailable}</p>
                 </div>
                 {showFinancials && (
                     <>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                            <p className="text-sm text-gray-500 font-medium">Total Sales Value</p>
-                            <p className="text-3xl font-bold text-indigo-600 mt-2">{formatCurrency(stats.totalSalesValue)}</p>
+                        <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 sm:col-span-1">
+                            <p className="text-xs md:text-sm text-gray-500 font-medium">Total Sales</p>
+                            <p className="text-lg md:text-3xl font-bold text-indigo-600 mt-1 md:mt-2">{formatCurrency(stats.totalSalesValue)}</p>
                         </div>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                            <p className="text-sm text-gray-500 font-medium">Total Collected</p>
-                            <p className="text-3xl font-bold text-emerald-600 mt-2">{formatCurrency(stats.totalCollected)}</p>
+                        <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 sm:col-span-1">
+                            <p className="text-xs md:text-sm text-gray-500 font-medium">Collected</p>
+                            <p className="text-lg md:text-3xl font-bold text-emerald-600 mt-1 md:mt-2">{formatCurrency(stats.totalCollected)}</p>
                         </div>
                     </>
                 )}
             </div>
 
-            {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                    <h3 className="text-lg font-bold text-gray-800 mb-6">Sales Performance</h3>
-                    <div className="flex items-end space-x-4 h-48 px-4">
+            <div className="grid grid-cols-1 gap-6">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <h3 className="text-sm md:text-lg font-bold text-gray-800 mb-6">Sales Performance</h3>
+                    <div className="flex items-end space-x-4 h-32 md:h-48 px-4">
                         {['Avail', 'Held', 'Sold'].map((label, i) => {
                             const val = i===0 ? stats.unitsAvailable : i===1 ? stats.unitsHeld : stats.unitsSold;
                             const color = i===0 ? 'bg-green-500' : i===1 ? 'bg-yellow-500' : 'bg-red-500';
@@ -431,7 +469,7 @@ const OverviewView = ({ stats, role }) => {
                                     <div className={`w-full ${bg} rounded-t-lg relative h-full`}>
                                         <div style={{ height: `${stats.totalUnits ? (val/stats.totalUnits)*100 : 0}%` }} className={`absolute bottom-0 w-full ${color} rounded-t-lg transition-all duration-500`}></div>
                                     </div>
-                                    <span className="text-xs font-medium text-gray-500">{label}</span>
+                                    <span className="text-[10px] md:text-xs font-medium text-gray-500">{label}</span>
                                 </div>
                             );
                         })}
@@ -441,8 +479,10 @@ const OverviewView = ({ stats, role }) => {
         </div>
     );
 };
+
 const BuildingView = ({ units, onUnitClick }) => {
-    // Group units by floor
+    const [sortOrder, setSortOrder] = useState('desc'); // 'desc' = 17 to 1, 'asc' = 1 to 17
+
     const floors = useMemo(() => {
         const grouped = {};
         units.forEach(unit => {
@@ -452,12 +492,13 @@ const BuildingView = ({ units, onUnitClick }) => {
         return grouped;
     }, [units]);
 
-    // Sort floor numbers descending (High floor at top)
     const sortedFloorNums = useMemo(() => {
-        return Object.keys(floors).map(Number).sort((a, b) => a - b);
-    }, [floors]);
+        const nums = Object.keys(floors).map(Number);
+        return sortOrder === 'desc' 
+            ? nums.sort((a, b) => b - a) 
+            : nums.sort((a, b) => a - b);
+    }, [floors, sortOrder]);
 
-    // INITIAL COLLAPSED STATE: Initially set all floor IDs as true (collapsed)
     const [collapsed, setCollapsed] = useState(() => {
         const initial = {};
         Object.keys(floors).forEach(f => initial[f] = true);
@@ -468,37 +509,43 @@ const BuildingView = ({ units, onUnitClick }) => {
         setCollapsed(prev => ({ ...prev, [floor]: !prev[floor] }));
     };
 
-
     return (
-        <div className="p-8 pt-24 min-h-screen bg-gray-50">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Building Structure</h2>
+        <div className="p-4 md:p-8 pt-20 md:pt-24 min-h-screen bg-gray-50">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl md:text-2xl font-bold text-gray-800">Building Structure</h2>
+                <button 
+                    onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl shadow-sm text-xs font-bold text-indigo-600 hover:bg-gray-50 transition"
+                >
+                    <Icons.Sort />
+                    {sortOrder === 'desc' ? 'Order: 17th → 1st' : 'Order: 1st → 17th'}
+                </button>
+            </div>
             
-            <div className="flex flex-col gap-4 max-w-6xl mx-auto">
+            <div className="flex flex-col gap-3 md:gap-4 max-w-6xl mx-auto">
                 {sortedFloorNums.map(floorNum => {
                     const isCollapsed = collapsed[floorNum];
                     return (
-                        <div key={floorNum} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden transition-all">
-                            {/* Collapsible Header */}
+                        <div key={floorNum} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                             <button 
                                 onClick={() => toggleFloor(floorNum)}
-                                className="w-full flex items-center justify-between p-4 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+                                className="w-full flex items-center justify-between p-3 md:p-4 bg-indigo-50 hover:bg-indigo-100 transition-colors"
                             >
-                                <div className="flex items-center gap-4">
-                                    <div className="h-10 w-10 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold shadow-sm">
+                                <div className="flex items-center gap-3 md:gap-4">
+                                    <div className="h-8 w-8 md:h-10 md:w-10 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold shadow-sm text-sm md:text-base">
                                         {floorNum}
                                     </div>
                                     <div className="text-left">
-                                        <span className="block text-lg font-bold text-gray-800 leading-tight">
+                                        <span className="block text-sm md:text-lg font-bold text-gray-800 leading-tight">
                                             {getOrdinal(floorNum)} Floor
                                         </span>
-                                        <span className="text-xs font-medium text-indigo-500">
+                                        <span className="text-[10px] md:text-xs font-medium text-indigo-500">
                                             {floors[floorNum].length} Units
                                         </span>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <div className="flex -space-x-2 mr-4">
-                                        {/* Mini preview of status dots */}
+                                    <div className="hidden sm:flex -space-x-2 mr-4">
                                         {floors[floorNum].slice(0, 5).map(u => (
                                             <div key={u.id} className={`w-3 h-3 rounded-full ring-2 ring-white ${
                                                 u.status === 'Available' ? 'bg-green-400' : u.status === 'Sold' ? 'bg-red-400' : 'bg-yellow-400'
@@ -506,7 +553,7 @@ const BuildingView = ({ units, onUnitClick }) => {
                                         ))}
                                     </div>
                                     <svg 
-                                        className={`w-6 h-6 text-indigo-400 transition-transform duration-300 ${isCollapsed ? '' : 'rotate-180'}`} 
+                                        className={`w-5 h-5 text-indigo-400 transition-transform duration-300 ${isCollapsed ? '' : 'rotate-180'}`} 
                                         fill="none" 
                                         stroke="currentColor" 
                                         viewBox="0 0 24 24"
@@ -516,10 +563,9 @@ const BuildingView = ({ units, onUnitClick }) => {
                                 </div>
                             </button>
                             
-                            {/* Units Container (Collapsible) */}
                             {!isCollapsed && (
-                                <div className="p-4 bg-white border-t border-indigo-100 animate-fadeIn">
-                                    <div className="flex flex-wrap gap-4 justify-start">
+                                <div className="p-3 md:p-4 bg-white border-t border-indigo-100">
+                                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 md:gap-4">
                                         {floors[floorNum]
                                             .sort((a, b) => a.unitId.localeCompare(b.unitId))
                                             .map(unit => (
@@ -527,14 +573,13 @@ const BuildingView = ({ units, onUnitClick }) => {
                                                     key={unit.id}
                                                     onClick={() => onUnitClick(unit)}
                                                     className={`
-                                                        relative w-28 h-24 rounded-lg border-2 transition-all duration-200 
-                                                        hover:shadow-md hover:-translate-y-1 flex flex-col justify-center items-center group
+                                                        relative aspect-square rounded-lg border-2 transition-all duration-200 
+                                                        hover:shadow-md flex flex-col justify-center items-center group
                                                         ${getStatusColor(unit.status)}
                                                     `}
                                                 >
-                                                    <span className="text-lg font-black">{unit.unitId}</span>
-                                                    <span className="text-[10px] uppercase font-bold opacity-80 mt-1">{unit.status}</span>
-                                                    <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-current opacity-50"></div>
+                                                    <span className="text-sm md:text-lg font-black">{unit.unitId}</span>
+                                                    <span className="text-[8px] md:text-[10px] uppercase font-bold opacity-80 mt-1">{unit.status}</span>
                                                 </button>
                                             ))
                                         }
@@ -549,12 +594,11 @@ const BuildingView = ({ units, onUnitClick }) => {
     );
 };
 
-// --- CONFIGURATION VIEW (Admin/Owner Only) ---
+// --- CONFIGURATION VIEW ---
 const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) => {
     const [backupStatus, setBackupStatus] = useState('idle');
     const [activeFloor, setActiveFloor] = useState(null);
     
-    // New Defaults State
     const [defaultFloor, setDefaultFloor] = useState(1);
     const [defaultUnitType, setDefaultUnitType] = useState('A');
     const [defaultArea, setDefaultArea] = useState(100);
@@ -607,7 +651,6 @@ const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) =
     const handleApplyDefaults = async () => {
         setApplyStatus('Applying...');
         try {
-            // Find units matching floor AND unit type (e.g. F01-A)
             const unitsToUpdate = units.filter(u => u.floor === Number(defaultFloor) && u.unitId === defaultUnitType);
             const batch = writeBatch(db);
             
@@ -630,81 +673,77 @@ const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) =
     };
 
     return (
-        <div className="p-8 pt-24 min-h-screen bg-gray-50">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">System Configuration</h2>
+        <div className="p-4 md:p-8 pt-20 md:pt-24 min-h-screen bg-gray-50">
+            <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-6">System Configuration</h2>
             
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                {/* Left Column: Defaults & Backup */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">
                 <div className="space-y-6">
-                    {/* Unit Default Pricing */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4">Unit Default Pricing & Area</h3>
-                        <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 className="text-base md:text-lg font-bold text-gray-800 mb-4">Unit Default Pricing & Area</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Floor</label>
-                                <select value={defaultFloor} onChange={e => setDefaultFloor(e.target.value)} className="w-full p-2 border rounded">
+                                <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Floor</label>
+                                <select value={defaultFloor} onChange={e => setDefaultFloor(e.target.value)} className="w-full p-2 border rounded text-sm">
                                     {Array.from({length: totalFloors}, (_, i) => i+1).map(f => <option key={f} value={f}>{f} Floor</option>)}
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Unit Type</label>
-                                <select value={defaultUnitType} onChange={e => setDefaultUnitType(e.target.value)} className="w-full p-2 border rounded">
+                                <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Unit Type</label>
+                                <select value={defaultUnitType} onChange={e => setDefaultUnitType(e.target.value)} className="w-full p-2 border rounded text-sm">
                                     {DEFAULT_UNIT_TYPES.map(t => <option key={t} value={t}>Unit {t}</option>)}
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Default Area (sqm)</label>
-                                <input type="number" value={defaultArea} onChange={e => setDefaultArea(e.target.value)} className="w-full p-2 border rounded" />
+                                <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Default Area (sqm)</label>
+                                <input type="number" value={defaultArea} onChange={e => setDefaultArea(e.target.value)} className="w-full p-2 border rounded text-sm" />
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Default Price/sqm ($)</label>
-                                <MoneyInput value={defaultPrice} onChange={setDefaultPrice} className="w-full p-2 border rounded" />
+                                <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Default Price/sqm ($)</label>
+                                <MoneyInput value={defaultPrice} onChange={setDefaultPrice} className="w-full p-2 border rounded text-sm" />
                             </div>
                         </div>
-                        <button onClick={handleApplyDefaults} className="w-full py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 transition">
-                            {applyStatus || 'Apply Default Values to Units'}
+                        <button onClick={handleApplyDefaults} className="w-full py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 transition text-sm">
+                            {applyStatus || 'Apply Default Values'}
                         </button>
                     </div>
 
-                    {/* Database Actions */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4">Database Operations</h3>
-                        <div className="flex gap-4">
+                    <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 className="text-base md:text-lg font-bold text-gray-800 mb-4">Database Operations</h3>
+                        <div className="flex flex-col sm:flex-row gap-4">
                             <button 
                                 onClick={handleBackup}
                                 disabled={backupStatus !== 'idle'}
-                                className={`flex-1 px-4 py-3 rounded-lg font-medium transition flex justify-center items-center space-x-2 ${
+                                className={`flex-1 px-4 py-3 rounded-lg font-medium transition flex justify-center items-center space-x-2 text-sm ${
                                     backupStatus === 'success' ? 'bg-green-100 text-green-700' : 'bg-gray-800 text-white hover:bg-gray-900'
                                 }`}
                             >
                                 <span>{backupStatus === 'loading' ? 'Backing up...' : backupStatus === 'success' ? 'Backup Successful' : 'Simulate Backup'}</span>
                             </button>
-                            <button className="flex-1 px-4 py-3 rounded-lg font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">Export Logs</button>
+                            <button className="flex-1 px-4 py-3 rounded-lg font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 text-sm">Export Logs</button>
                         </div>
                     </div>
                 </div>
 
-                {/* Right Column: Structure Management */}
                 <div className="space-y-6">
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                         <h3 className="text-lg font-bold text-gray-800 mb-4">Building Height</h3>
-                         <div className="flex justify-between items-center">
-                             <p className="text-2xl font-bold text-indigo-600">{totalFloors} Floors</p>
-                             <div className="space-x-2">
-                                 <button onClick={() => handleFloorUpdate(1)} className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200">+ Add Floor</button>
-                                 <button onClick={() => handleFloorUpdate(-1)} className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">- Remove</button>
+                    <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
+                         <h3 className="text-base md:text-lg font-bold text-gray-800 mb-4">Building Height</h3>
+                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                             <p className="text-xl md:text-2xl font-bold text-indigo-600">{totalFloors} Floors</p>
+                             <div className="flex gap-2">
+                                 <button onClick={() => handleFloorUpdate(1)} className="flex-1 px-3 py-2 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-bold">+ Add</button>
+                                 <button onClick={() => handleFloorUpdate(-1)} className="flex-1 px-3 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 text-xs font-bold">- Remove</button>
                              </div>
                          </div>
                     </div>
 
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[400px] flex flex-col">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4">Floor Detail Mgmt</h3>
+                    <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 h-[300px] md:h-[400px] flex flex-col">
+                        <h3 className="text-base md:text-lg font-bold text-gray-800 mb-4">Floor Detail Mgmt</h3>
                         <div className="flex-1 overflow-y-auto space-y-2 pr-2">
                             {Array.from({ length: totalFloors }, (_, i) => i + 1).map(floorNum => (
                                 <div key={floorNum} className="border border-gray-200 rounded-lg overflow-hidden">
                                     <button 
                                         onClick={() => setActiveFloor(activeFloor === floorNum ? null : floorNum)}
-                                        className={`w-full flex justify-between items-center p-3 text-sm font-medium transition ${activeFloor === floorNum ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 hover:bg-gray-100'}`}
+                                        className={`w-full flex justify-between items-center p-3 text-xs md:text-sm font-medium transition ${activeFloor === floorNum ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-50 hover:bg-gray-100'}`}
                                     >
                                         <span>{getOrdinal(floorNum)} Floor</span>
                                         <span>{(floors[floorNum] || []).length} Units</span>
@@ -714,7 +753,7 @@ const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) =
                                         <div className="p-3 bg-white border-t border-gray-100">
                                             <div className="flex flex-wrap gap-2 mb-3">
                                                 {(floors[floorNum] || []).sort((a,b) => a.unitId.localeCompare(b.unitId)).map(u => (
-                                                    <div key={u.id} className="flex items-center bg-gray-100 rounded px-2 py-1 text-xs">
+                                                    <div key={u.id} className="flex items-center bg-gray-100 rounded px-2 py-1 text-[10px]">
                                                         <span className="font-semibold mr-2">{u.unitId}</span>
                                                         <button onClick={async () => {
                                                             if(window.confirm('Delete unit?')) await deleteDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', u.id));
@@ -728,9 +767,9 @@ const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) =
                                                     const u = createUnitData(floorNum, nextId);
                                                     await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', u.id), u);
                                                 }}
-                                                className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 transition font-medium"
+                                                className="text-[10px] bg-green-100 text-green-700 px-3 py-1 rounded hover:bg-green-200 transition font-bold"
                                             >
-                                                + Add Next Unit
+                                                + Add Unit
                                             </button>
                                         </div>
                                     )}
@@ -744,16 +783,14 @@ const ConfigurationView = ({ totalFloors, setTotalFloors, db, userId, units }) =
     );
 };
 
-// --- USER MANAGEMENT VIEW (System Admin Only) ---
+// --- USER MANAGEMENT VIEW ---
 const UserManagementView = ({ db }) => {
     const [users, setUsers] = useState([]);
-    
-    // Form State
     const [newUser, setNewUser] = useState({
         email: '', password: '', role: ROLES.SALES, fName: '', lName: '', sex: 'M', age: '', phone: ''
     });
     const [formError, setFormError] = useState('');
-    const [resetUser, setResetUser] = useState(null); // ID of user being reset
+    const [resetUser, setResetUser] = useState(null);
 
     useEffect(() => {
         if (!db) return;
@@ -774,12 +811,12 @@ const UserManagementView = ({ db }) => {
         setFormError('');
         
         if (!validatePassword(newUser.password)) {
-            setFormError('Password must be >8 chars, with uppercase, number, & special char.');
+            setFormError('Password too weak (need Upper, Num, Special, 8+ chars).');
             return;
         }
 
         try {
-            const userId = Math.random().toString(36).substring(2, 15); // Simulated UID
+            const userId = Math.random().toString(36).substring(2, 15);
             const userData = { ...newUser, id: userId, createdAt: Timestamp.now() };
             if (newUser.role === ROLES.OWNER) {
                 delete userData.sex;
@@ -789,7 +826,6 @@ const UserManagementView = ({ db }) => {
 
             await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', userId), userData);
             setNewUser({ email: '', password: '', role: ROLES.SALES, fName: '', lName: '', sex: 'M', age: '', phone: '' });
-            alert('User created successfully (Simulated)');
         } catch (err) {
             setFormError(err.message);
         }
@@ -801,7 +837,6 @@ const UserManagementView = ({ db }) => {
         }
     };
 
-    // Admin Reset Password Modal
     const ResetPasswordModal = ({ userId, onClose }) => {
         const [newPwd, setNewPwd] = useState('');
         const [confirmPwd, setConfirmPwd] = useState('');
@@ -815,7 +850,7 @@ const UserManagementView = ({ db }) => {
             try {
                 await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', userId), { password: newPwd });
                 setSuccess(true);
-                setTimeout(() => onClose(), 1500); // Close after showing success
+                setTimeout(() => onClose(), 1500);
             } catch (e) {
                 setError("Error updating password.");
             }
@@ -823,33 +858,33 @@ const UserManagementView = ({ db }) => {
 
         return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
-                <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-xl transform transition-all scale-100">
+                <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-xl">
                     {success ? (
                         <div className="flex flex-col items-center justify-center py-6 text-green-600 animate-pulse">
                             <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            <h3 className="font-bold text-xl">Changed Successfully!</h3>
+                            <h3 className="font-bold text-lg">Changed Successfully!</h3>
                         </div>
                     ) : (
                         <>
-                            <h3 className="font-bold text-xl text-gray-800 mb-1">Reset Password</h3>
-                            <p className="text-gray-500 text-sm mb-4">Set a new password for this user.</p>
+                            <h3 className="font-bold text-lg text-gray-800 mb-1">Reset Password</h3>
+                            <p className="text-gray-500 text-xs mb-4">Set a new password for this user.</p>
                             
-                            {error && <p className="text-red-600 text-xs bg-red-50 p-2 rounded mb-3 border border-red-100">{error}</p>}
+                            {error && <p className="text-red-600 text-[10px] bg-red-50 p-2 rounded mb-3 border border-red-100">{error}</p>}
                             
                             <div className="space-y-3">
                                 <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase">New Password</label>
-                                    <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase">New Password</label>
+                                    <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
                                 </div>
                                 <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase">Confirm Password</label>
-                                    <input type="password" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Confirm Password</label>
+                                    <input type="password" value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
                                 </div>
                             </div>
                             
                             <div className="flex justify-end gap-3 mt-6">
-                                <button onClick={onClose} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg">Cancel</button>
-                                <button onClick={handleReset} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 shadow-sm">Reset Password</button>
+                                <button onClick={onClose} className="px-4 py-2 text-gray-600 text-sm font-medium hover:bg-gray-100 rounded-lg">Cancel</button>
+                                <button onClick={handleReset} className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-sm">Reset</button>
                             </div>
                         </>
                     )}
@@ -859,35 +894,34 @@ const UserManagementView = ({ db }) => {
     };
 
     return (
-        <div className="p-8 pt-24 min-h-screen bg-gray-50">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">User Management</h2>
+        <div className="p-4 md:p-8 pt-20 md:pt-24 min-h-screen bg-gray-50">
+            <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-6">User Management</h2>
             
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-                {/* User List */}
-                <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    <table className="w-full text-left">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 md:gap-8">
+                <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
+                    <table className="w-full text-left min-w-[500px]">
                         <thead className="bg-gray-50 border-b border-gray-200">
                             <tr>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">User</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Role</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Details</th>
-                                <th className="p-4 text-xs font-semibold text-gray-500 uppercase text-right">Actions</th>
+                                <th className="p-4 text-[10px] font-semibold text-gray-500 uppercase">User</th>
+                                <th className="p-4 text-[10px] font-semibold text-gray-500 uppercase">Role</th>
+                                <th className="p-4 text-[10px] font-semibold text-gray-500 uppercase">Details</th>
+                                <th className="p-4 text-[10px] font-semibold text-gray-500 uppercase text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                             {users.map(u => (
                                 <tr key={u.id} className="hover:bg-gray-50">
                                     <td className="p-4">
-                                        <div className="text-sm font-bold text-gray-800">{u.fName} {u.lName}</div>
-                                        <div className="text-xs text-gray-500">{u.email}</div>
+                                        <div className="text-xs font-bold text-gray-800">{u.fName} {u.lName}</div>
+                                        <div className="text-[10px] text-gray-500">{u.email}</div>
                                     </td>
-                                    <td className="p-4"><span className="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700">{u.role}</span></td>
-                                    <td className="p-4 text-xs text-gray-500">
+                                    <td className="p-4"><span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-indigo-50 text-indigo-700">{u.role}</span></td>
+                                    <td className="p-4 text-[10px] text-gray-500">
                                         {u.role !== ROLES.OWNER && u.phone && <div>{u.phone}</div>}
                                     </td>
                                     <td className="p-4 text-right space-x-2">
-                                        <button onClick={() => setResetUser(u.id)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">Reset Pwd</button>
-                                        <button onClick={() => deleteUser(u.id)} className="text-red-600 hover:text-red-800 text-xs font-medium">Delete</button>
+                                        <button onClick={() => setResetUser(u.id)} className="text-blue-600 hover:text-blue-800 text-[10px] font-medium">Reset</button>
+                                        <button onClick={() => deleteUser(id)} className="text-red-600 hover:text-red-800 text-[10px] font-medium">Delete</button>
                                     </td>
                                 </tr>
                             ))}
@@ -895,41 +929,39 @@ const UserManagementView = ({ db }) => {
                     </table>
                 </div>
 
-                {/* Create User Form */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-fit">
-                    <h3 className="text-lg font-bold text-gray-800 mb-4">Add New User</h3>
-                    {formError && <div className="mb-4 text-xs text-red-600 bg-red-50 p-2 rounded">{formError}</div>}
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 h-fit">
+                    <h3 className="text-base md:text-lg font-bold text-gray-800 mb-4">Add New User</h3>
+                    {formError && <div className="mb-4 text-[10px] text-red-600 bg-red-50 p-2 rounded">{formError}</div>}
                     <form onSubmit={handleCreateUser} className="space-y-3">
                         <div>
-                            <label className="block text-xs font-bold text-gray-500 mb-1">Role</label>
-                            <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})} className="w-full p-2 border rounded text-sm">
+                            <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Role</label>
+                            <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})} className="w-full p-2 border rounded text-xs">
                                 {Object.values(ROLES).map(r => <option key={r} value={r}>{r}</option>)}
                             </select>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-2">
-                            <input type="text" placeholder="First Name" required value={newUser.fName} onChange={e => setNewUser({...newUser, fName: e.target.value})} className="p-2 border rounded text-sm" />
-                            <input type="text" placeholder="Last Name" required value={newUser.lName} onChange={e => setNewUser({...newUser, lName: e.target.value})} className="p-2 border rounded text-sm" />
+                            <input type="text" placeholder="First Name" required value={newUser.fName} onChange={e => setNewUser({...newUser, fName: e.target.value})} className="p-2 border rounded text-xs" />
+                            <input type="text" placeholder="Last Name" required value={newUser.lName} onChange={e => setNewUser({...newUser, lName: e.target.value})} className="p-2 border rounded text-xs" />
                         </div>
 
-                        <input type="email" placeholder="Email Address" required value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} className="w-full p-2 border rounded text-sm" />
-                        <input type="password" placeholder="Password" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full p-2 border rounded text-sm" />
+                        <input type="email" placeholder="Email Address" required value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} className="w-full p-2 border rounded text-xs" />
+                        <input type="password" placeholder="Password" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full p-2 border rounded text-xs" />
 
-                        {/* Extended Info: Hidden for Owner Role */}
                         {newUser.role !== ROLES.OWNER && (
                             <div className="space-y-3 pt-2 border-t border-gray-100">
                                 <div className="grid grid-cols-2 gap-2">
-                                    <select value={newUser.sex} onChange={e => setNewUser({...newUser, sex: e.target.value})} className="p-2 border rounded text-sm">
+                                    <select value={newUser.sex} onChange={e => setNewUser({...newUser, sex: e.target.value})} className="p-2 border rounded text-xs">
                                         <option value="M">Male</option>
                                         <option value="F">Female</option>
                                     </select>
-                                    <input type="number" placeholder="Age" required value={newUser.age} onChange={e => setNewUser({...newUser, age: e.target.value})} className="p-2 border rounded text-sm" />
+                                    <input type="number" placeholder="Age" required value={newUser.age} onChange={e => setNewUser({...newUser, age: e.target.value})} className="p-2 border rounded text-xs" />
                                 </div>
-                                <input type="tel" placeholder="Phone Number" required value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} className="w-full p-2 border rounded text-sm" />
+                                <input type="tel" placeholder="Phone Number" required value={newUser.phone} onChange={e => setNewUser({...newUser, phone: e.target.value})} className="w-full p-2 border rounded text-xs" />
                             </div>
                         )}
 
-                        <button type="submit" className="w-full py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 transition mt-4">Create User</button>
+                        <button type="submit" className="w-full py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700 transition mt-4 text-sm">Create User</button>
                     </form>
                 </div>
             </div>
@@ -942,9 +974,8 @@ const UserManagementView = ({ db }) => {
 
 const ProfileModal = ({ userProfile, onClose, onSave }) => {
     const [data, setData] = useState({ fName: '', lName: '', phone: '' });
-    const [mode, setMode] = useState('profile'); // 'profile' or 'password'
+    const [mode, setMode] = useState('profile');
     
-    // Password change state
     const [pwData, setPwData] = useState({ old: '', new: '', confirm: '' });
     const [pwError, setPwError] = useState('');
     const [pwSuccess, setPwSuccess] = useState(false);
@@ -963,10 +994,7 @@ const ProfileModal = ({ userProfile, onClose, onSave }) => {
             setPwError("New passwords do not match.");
             return;
         }
-        // Save new password
         onSave({ ...userProfile, password: pwData.new });
-        
-        // Show success state
         setPwSuccess(true);
         setTimeout(() => {
             setPwSuccess(false);
@@ -983,44 +1011,44 @@ const ProfileModal = ({ userProfile, onClose, onSave }) => {
                         <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
                             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                         </div>
-                        <h3 className="font-bold text-xl">Password Changed Successfully!</h3>
+                        <h3 className="font-bold text-lg">Changed Successfully!</h3>
                     </div>
                 ) : (
                     <>
-                        <h3 className="text-xl font-bold text-gray-800 mb-4">{mode === 'profile' ? 'My Profile' : 'Change Password'}</h3>
+                        <h3 className="text-lg font-bold text-gray-800 mb-4">{mode === 'profile' ? 'My Profile' : 'Change Password'}</h3>
                         
                         {mode === 'profile' ? (
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="text-xs font-bold text-gray-500">First Name</label>
-                                        <input type="text" value={data.fName} onChange={e => setData({...data, fName: e.target.value})} className="w-full p-2 border rounded" />
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase">First Name</label>
+                                        <input type="text" value={data.fName} onChange={e => setData({...data, fName: e.target.value})} className="w-full p-2 border rounded text-sm" />
                                     </div>
                                     <div>
-                                        <label className="text-xs font-bold text-gray-500">Last Name</label>
-                                        <input type="text" value={data.lName} onChange={e => setData({...data, lName: e.target.value})} className="w-full p-2 border rounded" />
+                                        <label className="text-[10px] font-bold text-gray-500 uppercase">Last Name</label>
+                                        <input type="text" value={data.lName} onChange={e => setData({...data, lName: e.target.value})} className="w-full p-2 border rounded text-sm" />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-bold text-gray-500">Phone</label>
-                                    <input type="text" value={data.phone} onChange={e => setData({...data, phone: e.target.value})} className="w-full p-2 border rounded" />
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase">Phone</label>
+                                    <input type="text" value={data.phone} onChange={e => setData({...data, phone: e.target.value})} className="w-full p-2 border rounded text-sm" />
                                 </div>
-                                <button onClick={() => setMode('password')} className="text-indigo-600 text-sm font-semibold hover:underline">Change Password</button>
+                                <button onClick={() => setMode('password')} className="text-indigo-600 text-xs font-bold hover:underline">Change Password</button>
                             </div>
                         ) : (
                             <div className="space-y-4">
-                                {pwError && <p className="text-red-500 text-sm bg-red-50 p-2 rounded border border-red-100">{pwError}</p>}
-                                <input type="password" placeholder="Old Password" value={pwData.old} onChange={e => setPwData({...pwData, old: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" />
-                                <input type="password" placeholder="New Password" value={pwData.new} onChange={e => setPwData({...pwData, new: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" />
-                                <input type="password" placeholder="Confirm New Password" value={pwData.confirm} onChange={e => setPwData({...pwData, confirm: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                {pwError && <p className="text-red-500 text-[10px] bg-red-50 p-2 rounded border border-red-100">{pwError}</p>}
+                                <input type="password" placeholder="Old Password" value={pwData.old} onChange={e => setPwData({...pwData, old: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
+                                <input type="password" placeholder="New Password" value={pwData.new} onChange={e => setPwData({...pwData, new: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
+                                <input type="password" placeholder="Confirm New Password" value={pwData.confirm} onChange={e => setPwData({...pwData, confirm: e.target.value})} className="w-full p-2 border rounded focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
                             </div>
                         )}
 
                         <div className="mt-6 flex justify-end space-x-3">
-                            <button onClick={() => mode === 'password' ? setMode('profile') : onClose()} className="px-4 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded">
+                            <button onClick={() => mode === 'password' ? setMode('profile') : onClose()} className="px-4 py-2 text-gray-600 text-sm font-medium hover:bg-gray-100 rounded">
                                 {mode === 'password' ? 'Back' : 'Cancel'}
                             </button>
-                            <button onClick={() => mode === 'password' ? handleChangePassword() : onSave(data)} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded hover:bg-indigo-700">
+                            <button onClick={() => mode === 'password' ? handleChangePassword() : onSave(data)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded hover:bg-indigo-700">
                                 {mode === 'password' ? 'Change Password' : 'Save'}
                             </button>
                         </div>
@@ -1034,13 +1062,12 @@ const ProfileModal = ({ userProfile, onClose, onSave }) => {
 const EditModal = ({ unit, closeModal, db, role, userId }) => {
     const canEdit = PERMISSIONS[role].canEdit;
     
-    // State
     const [status, setStatus] = useState(unit.status);
-    const [clientName, setClientName] = useState(unit.clientName);
+    const [clientName, setClientName] = useState(unit.clientName || '');
+    const [clientPhone, setClientPhone] = useState(unit.clientPhone || '');
     const [areaSqm, setAreaSqm] = useState(unit.areaSqm);
     const [pricePerSqm, setPricePerSqm] = useState(unit.pricePerSqm);
     
-    // SALES LOGIC STATE
     const [schedule, setSchedule] = useState(unit.paymentSchedule.map(p => ({
         ...p,
         dueDate: p.dueDate instanceof Timestamp ? p.dueDate.toDate().toISOString().substring(0, 10) : p.dueDate,
@@ -1048,14 +1075,11 @@ const EditModal = ({ unit, closeModal, db, role, userId }) => {
     })));
     const [newInstallment, setNewInstallment] = useState({ amount: '', date: '' });
     
-    // Calculated
     const totalPrice = areaSqm * pricePerSqm;
     const financials = useMemo(() => calculateFinancialsFromSchedule(schedule.map(s => ({ ...s, dueDate: new Date(s.dueDate) }))), [schedule]);
 
-    // Sales Agent Permission Check for SOLD units
     const isSalesAgent = role === ROLES.SALES;
     const isSold = unit.status === 'Sold';
-    // If it's a sales agent and the unit is SOLD, they cannot see financial details
     const hideFinancials = isSalesAgent && isSold;
 
     const handleAddInstallment = () => {
@@ -1078,7 +1102,7 @@ const EditModal = ({ unit, closeModal, db, role, userId }) => {
     const handleSave = async () => {
         if (!db) return;
         if ((status === 'Held' || status === 'Sold') && financials.totalScheduled !== totalPrice) {
-            if(!window.confirm(`Warning: Scheduled total ($${financials.totalScheduled}) does not match Total Price ($${totalPrice}). Save anyway?`)) return;
+            if(!window.confirm(`Warning: Scheduled total does not match Total Price. Save anyway?`)) return;
         }
 
         const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', 'units', unit.id);
@@ -1089,6 +1113,7 @@ const EditModal = ({ unit, closeModal, db, role, userId }) => {
         await updateDoc(ref, {
             status,
             clientName: (status === 'Available') ? '' : clientName,
+            clientPhone: (status === 'Available') ? '' : clientPhone,
             areaSqm: Number(areaSqm),
             pricePerSqm: Number(pricePerSqm),
             totalPrice,
@@ -1102,85 +1127,110 @@ const EditModal = ({ unit, closeModal, db, role, userId }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
-                <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-gray-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[95vh] flex flex-col">
+                <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                     <div>
-                        <h3 className="text-xl font-bold text-gray-800">Unit {unit.unitId} - {unit.floorName}</h3>
-                        <p className="text-xs text-gray-500 mt-1">{canEdit ? 'Edit Mode' : 'Read-Only Mode'}</p>
+                        <h3 className="text-lg md:text-xl font-bold text-gray-800">Unit {unit.unitId} - {unit.floorName}</h3>
+                        <p className="text-[10px] md:text-xs text-gray-500 mt-1">{canEdit ? 'Edit Mode' : 'Read-Only Mode'}</p>
                     </div>
                     <button onClick={closeModal} className="text-gray-400 hover:text-gray-600">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        <Icons.Close />
                     </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                <div className="p-4 md:p-6 overflow-y-auto space-y-6 flex-1">
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Unit Status</label>
-                        <select disabled={!canEdit} value={status} onChange={(e) => setStatus(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60">
+                        <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-2">Unit Status</label>
+                        <select disabled={!canEdit} value={status} onChange={(e) => setStatus(e.target.value)} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm disabled:opacity-60 font-bold">
                             <option value="Available">Available</option>
                             <option value="Held">Held (Deposit)</option>
                             <option value="Sold">Sold (Contract)</option>
                         </select>
                     </div>
 
+                    {(status === 'Held' || status === 'Sold') && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fadeIn">
+                            <div>
+                                <label className="block text-[10px] font-semibold text-red-600 uppercase mb-1">Buyer Name *</label>
+                                <input 
+                                    type="text" 
+                                    disabled={!canEdit} 
+                                    value={clientName} 
+                                    onChange={(e) => setClientName(e.target.value)} 
+                                    className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-sm" 
+                                    placeholder="Full Name" 
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-semibold text-red-600 uppercase mb-1">Phone Number *</label>
+                                <input 
+                                    type="tel" 
+                                    disabled={!canEdit} 
+                                    value={clientPhone} 
+                                    onChange={(e) => setClientPhone(e.target.value)} 
+                                    className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-sm" 
+                                    placeholder="+1 234..." 
+                                    required
+                                />
+                            </div>
+                        </div>
+                    )}
+
                     {hideFinancials ? (
-                        <div className="p-8 bg-gray-50 rounded-xl text-center border border-gray-100">
-                            <h4 className="text-lg font-bold text-gray-800 mb-2">Unit Sold</h4>
-                            <p className="text-gray-500 text-sm">This unit has been sold. Financial details and client information are restricted to Admin and Owner roles.</p>
+                        <div className="p-6 bg-gray-50 rounded-xl text-center border border-gray-100">
+                            <h4 className="text-base font-bold text-gray-800 mb-2">Unit Sold</h4>
+                            <p className="text-gray-500 text-xs">Financial details restricted to Admin/Owner.</p>
+                            {clientPhone && <p className="mt-2 text-indigo-600 font-bold">Contact: {clientPhone}</p>}
                         </div>
                     ) : (
                         <>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Area (sqm)</label>
-                                    <input type="number" disabled={!canEdit} value={areaSqm} onChange={(e) => setAreaSqm(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60" />
+                                    <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Area (sqm)</label>
+                                    <input type="number" disabled={!canEdit} value={areaSqm} onChange={(e) => setAreaSqm(e.target.value)} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm disabled:opacity-60" />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Price/sqm ($)</label>
-                                    <MoneyInput disabled={!canEdit} value={pricePerSqm} onChange={setPricePerSqm} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60" />
+                                    <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-1">Price/sqm ($)</label>
+                                    <MoneyInput disabled={!canEdit} value={pricePerSqm} onChange={setPricePerSqm} className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm disabled:opacity-60" />
                                 </div>
                                 <div className="col-span-2 bg-indigo-50 p-4 rounded-xl flex justify-between items-center border border-indigo-100">
-                                    <span className="text-indigo-800 font-medium">Total Price</span>
-                                    <span className="text-xl font-black text-indigo-700">{formatCurrency(totalPrice)}</span>
+                                    <span className="text-indigo-800 text-sm font-medium">Total Price</span>
+                                    <span className="text-lg font-black text-indigo-700">{formatCurrency(totalPrice)}</span>
                                 </div>
                             </div>
 
                             {(status === 'Held' || status === 'Sold') && (
                                 <div className="pt-4 border-t border-gray-100 space-y-4">
-                                    <div>
-                                        <label className="block text-xs font-semibold text-gray-500 uppercase mb-2">Client Name</label>
-                                        <input type="text" disabled={!canEdit} value={clientName} onChange={(e) => setClientName(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl disabled:opacity-60" placeholder="Enter client name..." />
-                                    </div>
-
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <div className="p-3 bg-green-50 border border-green-100 rounded-xl text-center"><p className="text-xs font-bold text-green-600 uppercase">Paid</p><p className="text-lg font-black text-green-800">{formatCurrency(financials.amountPaid)}</p></div>
-                                        <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-center"><p className="text-xs font-bold text-red-600 uppercase">Remaining</p><p className="text-lg font-black text-red-800">{formatCurrency(totalPrice - financials.amountPaid)}</p></div>
-                                        <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl text-center"><p className="text-xs font-bold text-blue-600 uppercase">Scheduled</p><p className="text-lg font-black text-blue-800">{formatCurrency(financials.totalScheduled)}</p></div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="p-2 bg-green-50 rounded-xl text-center"><p className="text-[8px] font-bold text-green-600 uppercase">Paid</p><p className="text-xs md:text-sm font-black text-green-800">{formatCurrency(financials.amountPaid)}</p></div>
+                                        <div className="p-2 bg-red-50 rounded-xl text-center"><p className="text-[8px] font-bold text-red-600 uppercase">Remaining</p><p className="text-xs md:text-sm font-black text-red-800">{formatCurrency(totalPrice - financials.amountPaid)}</p></div>
+                                        <div className="p-2 bg-blue-50 rounded-xl text-center"><p className="text-[8px] font-bold text-blue-600 uppercase">Scheduled</p><p className="text-xs md:text-sm font-black text-blue-800">{formatCurrency(financials.totalScheduled)}</p></div>
                                     </div>
 
                                     <div>
-                                        <h4 className="font-bold text-gray-800 mb-2">Payment Schedule</h4>
-                                        <div className="max-h-48 overflow-y-auto space-y-2 mb-3">
-                                            {schedule.length === 0 && <p className="text-sm text-gray-400 italic">No installments added.</p>}
+                                        <h4 className="font-bold text-xs text-gray-800 mb-2 uppercase">Payment Schedule</h4>
+                                        <div className="max-h-40 overflow-y-auto space-y-2 mb-3">
+                                            {schedule.length === 0 && <p className="text-[10px] text-gray-400 italic">No installments added.</p>}
                                             {schedule.map((item, idx) => (
                                                 <div key={item.id} className="flex gap-2 items-center p-2 border rounded-lg bg-gray-50">
-                                                    <span className="text-xs font-bold text-gray-400 w-6">#{idx+1}</span>
-                                                    <MoneyInput disabled={!canEdit} value={item.amount} onChange={(val) => handleUpdateInstallment(item.id, 'amount', val)} className="w-24 p-1 text-sm border rounded" />
-                                                    <input type="date" disabled={!canEdit} value={item.dueDate} onChange={(e) => handleUpdateInstallment(item.id, 'dueDate', e.target.value)} className="flex-1 p-1 text-sm border rounded" />
-                                                    <select disabled={!canEdit} value={item.status} onChange={(e) => handleUpdateInstallment(item.id, 'status', e.target.value)} className={`text-xs font-bold p-1 rounded ${item.status === 'Paid' ? 'text-green-600 bg-green-100' : 'text-yellow-600 bg-yellow-100'}`}>
+                                                    <span className="text-[10px] font-bold text-gray-400 w-4">#{idx+1}</span>
+                                                    <MoneyInput disabled={!canEdit} value={item.amount} onChange={(val) => handleUpdateInstallment(item.id, 'amount', val)} className="w-20 p-1 text-[10px] border rounded" />
+                                                    <input type="date" disabled={!canEdit} value={item.dueDate} onChange={(e) => handleUpdateInstallment(item.id, 'dueDate', e.target.value)} className="flex-1 p-1 text-[10px] border rounded" />
+                                                    <select disabled={!canEdit} value={item.status} onChange={(e) => handleUpdateInstallment(item.id, 'status', e.target.value)} className="text-[10px] p-1 rounded font-bold">
                                                         <option value="Pending">Pending</option>
                                                         <option value="Paid">Paid</option>
                                                     </select>
-                                                    {canEdit && <button onClick={() => handleRemoveInstallment(item.id)} className="text-red-400 hover:text-red-600 px-1">×</button>}
+                                                    {canEdit && <button onClick={() => handleRemoveInstallment(item.id)} className="text-red-400 hover:text-red-600">×</button>}
                                                 </div>
                                             ))}
                                         </div>
                                         {canEdit && (
                                             <div className="flex gap-2">
-                                                <MoneyInput placeholder="Amount" value={newInstallment.amount} onChange={(val) => setNewInstallment({...newInstallment, amount: val})} className="w-1/3 p-2 text-sm border rounded-lg" />
-                                                <input type="date" value={newInstallment.date} onChange={(e) => setNewInstallment({...newInstallment, date: e.target.value})} className="flex-1 p-2 text-sm border rounded-lg" />
-                                                <button onClick={handleAddInstallment} className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold hover:bg-indigo-200">Add</button>
+                                                <MoneyInput placeholder="Amount" value={newInstallment.amount} onChange={(val) => setNewInstallment({...newInstallment, amount: val})} className="w-1/3 p-2 text-xs border rounded-lg" />
+                                                <input type="date" value={newInstallment.date} onChange={(e) => setNewInstallment({...newInstallment, date: e.target.value})} className="flex-1 p-2 text-xs border rounded-lg" />
+                                                <button onClick={handleAddInstallment} className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-200">Add</button>
                                             </div>
                                         )}
                                     </div>
@@ -1190,11 +1240,9 @@ const EditModal = ({ unit, closeModal, db, role, userId }) => {
                     )}
                 </div>
 
-                <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end space-x-3">
-                    <button onClick={closeModal} className="px-6 py-2 text-gray-600 font-medium hover:bg-gray-100 rounded-lg transition">Close</button>
-                    {canEdit && !hideFinancials && <button onClick={handleSave} className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700 transition">Save Changes</button>}
-                    {/* For sales agents who can change status but not edit financials */}
-                    {canEdit && hideFinancials && false /* Placeholder if we wanted to allow Status Change only */}
+                <div className="p-4 md:p-6 border-t border-gray-100 bg-gray-50 flex justify-end space-x-3">
+                    <button onClick={closeModal} className="px-5 py-2 text-xs text-gray-600 font-bold hover:bg-gray-100 rounded-lg">Close</button>
+                    {canEdit && !hideFinancials && <button onClick={handleSave} className="px-5 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg shadow">Save Changes</button>}
                 </div>
             </div>
         </div>
@@ -1210,14 +1258,13 @@ export default function App() {
     const [loading, setLoading] = useState(true);
     const [loginError, setLoginError] = useState(null);
     
-    // UI State
     const [view, setView] = useState('overview');
     const [units, setUnits] = useState([]);
     const [totalFloors, setTotalFloors] = useState(DEFAULT_INITIAL_FLOORS);
     const [selectedUnit, setSelectedUnit] = useState(null);
     const [showProfileModal, setShowProfileModal] = useState(false);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-    // Firebase
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
 
@@ -1243,13 +1290,11 @@ export default function App() {
     useEffect(() => {
         if (!user || !db) return;
 
-        // Settings Listener
         const unsubSettings = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'settings', 'global'), (snap) => {
             if (snap.exists()) setTotalFloors(snap.data().totalFloors || DEFAULT_INITIAL_FLOORS);
             else setDoc(snap.ref, { totalFloors: DEFAULT_INITIAL_FLOORS, createdAt: Timestamp.now() });
-        });
+        }, (err) => console.error(err));
 
-        // Units Listener
         const unsubUnits = onSnapshot(collection(db, 'artifacts', APP_ID, 'public', 'data', 'units'), (snap) => {
             const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             if (data.length === 0 && role === ROLES.ADMIN) {
@@ -1264,17 +1309,15 @@ export default function App() {
             } else {
                 setUnits(data);
             }
-        });
+        }, (err) => console.error(err));
         
-        // Profile Listener
         const unsubProfile = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', user.uid), (snap) => {
             if (snap.exists()) {
                 const data = snap.data();
                 setUserProfile(data);
-                // If not strictly the hardcoded admin, trust the DB role (unless simulated)
                 if (user.uid !== 'hardcoded-admin-uid') setRole(data.role || ROLES.SALES);
             }
-        });
+        }, (err) => console.error(err));
 
         return () => { unsubSettings(); unsubUnits(); unsubProfile(); };
     }, [user, db, role]);
@@ -1287,13 +1330,11 @@ export default function App() {
             let targetProfile = {};
             let isHardcodedAdmin = false;
 
-            // 1. Check Hardcoded Admin
             if (email === 'maedotmetsihet0@gmail.com' && password === 'M@ed0t2090') {
                 targetRole = ROLES.ADMIN;
                 isHardcodedAdmin = true;
                 targetProfile = { fName: 'Maedot', lName: 'Admin', role: ROLES.ADMIN };
             } 
-            // 2. Check Database for Simulated Users (if not hardcoded)
             else if (email && password && db) {
                  const q = query(collection(db, 'artifacts', APP_ID, 'public', 'data', 'users'), where('email', '==', email), where('password', '==', password));
                  const snap = await getDocs(q);
@@ -1302,33 +1343,26 @@ export default function App() {
                  targetRole = userData.role;
                  targetProfile = userData;
             }
-            // 3. Demo Role Fallback
             else if (demoRole) {
                 targetRole = demoRole;
                 targetProfile = { fName: 'Demo', lName: demoRole, role: demoRole };
             } 
-            else {
-                throw new Error("Please enter credentials.");
-            }
+            else { throw new Error("Please enter credentials."); }
             
-            // Perform Auth
             if (!user) {
                 if (INITIAL_AUTH_TOKEN) await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
                 else await signInAnonymously(auth);
             }
 
-            // Set State
             setRole(targetRole);
             setUserProfile(targetProfile);
             
-            // Sync current profile to DB if it's the hardcoded admin (to allow editing)
             if (isHardcodedAdmin && auth.currentUser) {
                  const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', auth.currentUser.uid);
                  await setDoc(ref, { ...targetProfile, id: auth.currentUser.uid }, { merge: true });
             }
 
         } catch (e) {
-            console.error(e);
             setLoginError(e.message);
         } finally {
             setLoading(false);
@@ -1339,6 +1373,14 @@ export default function App() {
         if (!user || !db) return;
         await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'users', user.uid), newData, { merge: true });
         setShowProfileModal(false);
+    };
+
+    const handleNotificationClick = (unitId) => {
+        const target = units.find(u => u.id === unitId);
+        if (target) {
+            setView('building');
+            setSelectedUnit(target);
+        }
     };
 
     const stats = useMemo(() => {
@@ -1356,20 +1398,39 @@ export default function App() {
     }, [units]);
 
     const notifications = useMemo(() => {
-        return units.filter(u => u.status === 'Sold').slice(0, 3).map(u => ({
-            title: `Payment Reminder: Unit ${u.unitId}`,
-            msg: `Scheduled payment pending for ${u.clientName || 'Client'}.`
-        }));
+        return units
+            .filter(u => (u.status === 'Sold' || u.status === 'Held') && u.clientName)
+            .slice(0, 5)
+            .map(u => ({
+                unitId: u.id,
+                title: `Unit ${u.id} - ${u.clientName}`,
+                msg: `Pending payment for ${u.floorName}. View details for schedule.`,
+                phone: u.clientPhone
+            }));
     }, [units]);
 
     if (!role) return <LoginScreen onLogin={handleLogin} loading={loading} error={loginError} />;
 
     return (
         <div className="font-inter bg-gray-50 min-h-screen text-gray-900">
-            <Sidebar currentView={view} setView={setView} role={role} onLogout={() => { signOut(auth); setRole(null); setView('overview'); }} />
-            <Header role={role} notifications={notifications} userProfile={userProfile} onOpenProfile={() => setShowProfileModal(true)} />
+            <Sidebar 
+                currentView={view} 
+                setView={setView} 
+                role={role} 
+                onLogout={() => { signOut(auth); setRole(null); setView('overview'); }} 
+                isOpen={isSidebarOpen}
+                setIsOpen={setIsSidebarOpen}
+            />
+            <Header 
+                role={role} 
+                notifications={notifications} 
+                userProfile={userProfile} 
+                onOpenProfile={() => setShowProfileModal(true)} 
+                onMenuClick={() => setIsSidebarOpen(true)}
+                onNotifClick={handleNotificationClick}
+            />
 
-            <main className="pl-64 transition-all duration-300">
+            <main className="lg:pl-64 transition-all duration-300">
                 {view === 'overview' && <OverviewView stats={stats} role={role} />}
                 {view === 'building' && <BuildingView units={units} onUnitClick={setSelectedUnit} />}
                 {view === 'config' && <ConfigurationView totalFloors={totalFloors} setTotalFloors={setTotalFloors} db={db} userId={user.uid} units={units} />}
